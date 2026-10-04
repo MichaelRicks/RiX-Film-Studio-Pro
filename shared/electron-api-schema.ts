@@ -441,7 +441,7 @@ export const electronAPISchemas = {
     input: z.object({}),
     output: emptyResult,
   },
-  // "Direct with Claude": open Claude Desktop's Code tab with this brief prefilled.
+  // "Edit with Claude": open Claude Desktop's Code tab with this brief prefilled.
   openClaudeCode: {
     input: z.object({ prompt: z.string() }),
     output: emptyResult,

@@ -3,7 +3,7 @@ import { Clapperboard, ExternalLink, Loader2, X } from 'lucide-react'
 import type { Asset } from '../types/project-model'
 
 /**
- * "Direct with Claude": turns a short brief into a prompt and opens it, prefilled,
+ * "Edit with Claude": turns a short brief into a prompt and opens it, prefilled,
  * in Claude Desktop's Code tab. Claude runs in the user's OWN Claude app on their
  * own plan (no API keys / per-call billing) and edits the timeline through the RiX
  * MCP server + rix-editor skill. The user presses Send in Claude.
@@ -195,7 +195,7 @@ export function DirectWithClaudeModal({ project, projectAudio, timelines, onClos
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div className="flex items-center gap-2.5">
             <Clapperboard className="h-5 w-5 text-[rgb(var(--accent))]" />
-            <h2 className="text-lg font-bold text-white">Direct with Claude</h2>
+            <h2 className="text-lg font-bold text-white">Edit with Claude</h2>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors">
             <X className="h-5 w-5" />

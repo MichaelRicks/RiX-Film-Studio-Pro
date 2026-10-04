@@ -436,7 +436,7 @@ function registerMcpIpc(): void {
     }
   })
 
-  // "Direct with Claude": open Claude Desktop's Code tab with the brief PREFILLED (the
+  // "Edit with Claude": open Claude Desktop's Code tab with the brief PREFILLED (the
   // user reviews and presses Send). The link runs on the user's own Claude plan — RiX
   // never handles their Claude login. Scheme and host are fixed here, never from input.
   handle('openClaudeCode', async ({ prompt }) => {

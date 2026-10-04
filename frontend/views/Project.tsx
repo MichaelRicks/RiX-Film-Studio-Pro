@@ -274,7 +274,7 @@ export function Project() {
             title="Have Claude cut a video from your assets (runs in your own Claude app)"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white bg-[rgb(var(--accent)/0.85)] hover:bg-[rgb(var(--accent))] transition-colors"
           >
-            <Clapperboard className="h-4 w-4" />Direct with Claude
+            <Clapperboard className="h-4 w-4" />Edit with Claude
           </button>
           <button
             onClick={handleManualSave}
