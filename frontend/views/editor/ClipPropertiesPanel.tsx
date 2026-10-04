@@ -57,6 +57,8 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
   const currentTime = useEditorStore(selectCurrentTime)
   // Opacity value dialed in between keyframes, not yet committed with ◆.
   const [pendingOpacity, setPendingOpacity] = useState<{ clipId: string; t: number; value: number } | null>(null)
+  // Volume dialed in between keyframes, not yet committed with ◆ (percent, like the row).
+  const [pendingVolume, setPendingVolume] = useState<{ clipId: string; t: number; value: number } | null>(null)
   const assets = useEditorStore(selectAssets)
   const clips = useEditorStore(selectClips)
   const tracks = useEditorStore(selectTracks)
@@ -776,25 +778,39 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
           </div>
         )}
 
-        {hasAudioControls && (
-          <div>
-            <label className="block text-xs text-zinc-500 mb-1">Volume</label>
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.1}
-              value={effectiveMuted ? 0 : effectiveVolume}
-              onChange={(e) => setClipAudioLevel(selectedClip.id, parseFloat(e.target.value))}
-              className="w-full"
+        {hasAudioControls && (() => {
+          // Volume lives on the audio clip (a video clip's linked audio); its automation
+          // keyframes — the timeline's rubber band, or Claude's ducking — are edited here too.
+          const volumeTarget = selectedClip.type === 'audio'
+            ? selectedClip
+            : (selectedClip.linkedClipIds ?? [])
+              .map(id => clips.find(c => c.id === id))
+              .find(c => c?.type === 'audio') ?? selectedClip
+          const volumeKeys = (volumeTarget.volumeKeyframes ?? []).map(k => ({ t: k.t, value: k.value * 100 }))
+          return (
+            <OpacityKeyframeRow
+              label="Volume"
+              max={200}
+              clipId={volumeTarget.id}
+              startTime={volumeTarget.startTime}
+              duration={volumeTarget.duration}
+              keys={volumeKeys}
+              staticValue={Math.round((effectiveMuted ? 0 : effectiveVolume) * 100)}
+              currentTime={currentTime}
+              pending={pendingVolume}
+              setPending={setPendingVolume}
+              setKeys={(next) => updateClip(volumeTarget.id, {
+                volumeKeyframes: next && next.length
+                  ? next.map(k => ({ t: +k.t.toFixed(3), value: +(k.value / 100).toFixed(3) }))
+                  : undefined,
+              })}
+              setStatic={(v) => setClipAudioLevel(selectedClip.id, v / 100)}
+              clearKeys={(v) => updateClip(volumeTarget.id, { volumeKeyframes: undefined, volume: v / 100 })}
+              setCurrentTime={setCurrentTime}
+              accent="accent-emerald-500"
             />
-            <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
-              <span>0%</span>
-              <span className="text-white">{effectiveMuted ? '0' : Math.round(effectiveVolume * 100)}%</span>
-              <span>200%</span>
-            </div>
-          </div>
-        )}
+          )
+        })()}
 
         {hasAudioControls && (() => {
           const maxFade = Math.max(0.1, Math.min(5, selectedClip.duration / 2))

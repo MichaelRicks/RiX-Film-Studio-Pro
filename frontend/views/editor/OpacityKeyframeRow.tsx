@@ -34,13 +34,17 @@ export interface OpacityKeyframeRowProps {
   setCurrentTime: (time: number) => void
   /** Slider accent, to sit with the surrounding section. */
   accent?: string
+  /** Row label and slider ceiling; defaults make it the opacity row (also used for Volume, 0..200%). */
+  label?: string
+  max?: number
 }
 
 export function OpacityKeyframeRow({
   clipId, startTime, duration, keys: rawKeys, staticValue, currentTime,
   pending: rawPending, setPending, setKeys, setStatic, clearKeys, setCurrentTime,
-  accent = 'accent-cyan-500',
+  accent = 'accent-cyan-500', label = 'Opacity', max = 100,
 }: OpacityKeyframeRowProps) {
+  const noun = label.toLowerCase()
   const keys = [...rawKeys].sort((a, b) => a.t - b.t)
   const localT = currentTime - startTime
   const inClip = localT >= -1e-3 && localT <= duration + 1e-3
@@ -58,10 +62,10 @@ export function OpacityKeyframeRow({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-zinc-400">Opacity</span>
+        <span className="text-[10px] text-zinc-400">{label}</span>
         <div className="flex items-center gap-1.5">
           <input
-            type="range" min={0} max={100} value={value}
+            type="range" min={0} max={max} value={value}
             disabled={keys.length > 0 && !inClip}
             onChange={e => {
               const v = parseInt(e.target.value)
@@ -76,7 +80,7 @@ export function OpacityKeyframeRow({
             onClick={() => { upsert(value); setPending(null) }}
             disabled={!inClip}
             className={`${iconBtn} ${keyIdx >= 0 ? 'text-amber-300' : 'text-amber-300/70'} ${pending != null ? 'ring-1 ring-amber-400 animate-pulse' : ''}`}
-            title={inClip ? 'Set an opacity keyframe at the playhead with this value' : 'Move the playhead over this clip to add a keyframe'}
+            title={inClip ? `Set a ${noun} keyframe at the playhead with this value` : 'Move the playhead over this clip to add a keyframe'}
           >
             <Diamond className={`h-3 w-3 ${keyIdx >= 0 ? 'fill-current' : ''}`} />
           </button>
@@ -103,7 +107,7 @@ export function OpacityKeyframeRow({
             <button
               onClick={() => clearKeys(value)}
               className={iconBtn}
-              title="Clear keyframes (keeps the current opacity)"
+              title={`Clear keyframes (keeps the current ${noun})`}
             >
               <Eraser className="h-3 w-3" />
             </button>
