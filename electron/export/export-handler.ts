@@ -9,7 +9,7 @@ import { validatePath } from '../path-validation'
 import { findFfmpegPath, getVideoDimensions, runFfmpeg, stopExportProcess } from './ffmpeg-utils'
 import { buildDissolveTimeRemap, collectOverlayLayers, computeFinalVideoDuration, flattenTimeline } from './timeline'
 import { buildVideoFilterGraph } from './video-filter'
-import { mixAudioToPcm } from './audio-mix'
+import { mixAudioToPcmFile } from './audio-mix'
 import { handle } from '../ipc/typed-handle'
 import type { z } from 'zod'
 import type { electronAPISchemas } from '../../shared/electron-api-schema'
@@ -186,11 +186,9 @@ export async function exportTimelineNative(
       totalDuration = Math.max(totalDuration, c.startTime + c.duration)
     }
 
-    const { pcmBuffer, sampleRate, channels: audioChannels } = await mixAudioToPcm(remappedClips, totalDuration, ffmpegPath)
-
     const tmpRawPcm = path.join(tmpDir, `ltx-pcm-${ts}.raw`)
-    fs.writeFileSync(tmpRawPcm, pcmBuffer)
-    logger.info( `[Export] Wrote raw PCM: ${pcmBuffer.length} bytes (${totalDuration.toFixed(2)}s)`)
+    const { bytes: pcmBytes, sampleRate, channels: audioChannels } = await mixAudioToPcmFile(remappedClips, totalDuration, ffmpegPath, tmpRawPcm)
+    logger.info( `[Export] Wrote raw PCM: ${pcmBytes} bytes (${totalDuration.toFixed(2)}s)`)
 
     {
       const r = await runFfmpeg(ffmpegPath, [
