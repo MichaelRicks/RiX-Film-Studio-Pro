@@ -7,7 +7,7 @@ import { getMainWindow } from '../window'
 import { logger } from '../logger'
 import { validatePath } from '../path-validation'
 import { findFfmpegPath, getVideoDimensions, runFfmpeg, stopExportProcess } from './ffmpeg-utils'
-import { buildDissolveTimeRemap, collectOverlayLayers, computeFinalVideoDuration, flattenTimeline } from './timeline'
+import { buildDissolveTimeRemap, collectOverlayLayers, computeFinalVideoDuration, findDissolveBoundaries, flattenTimeline, type FlatSegment, type OverlayLayer } from './timeline'
 import { buildVideoFilterGraph } from './video-filter'
 import { mixAudioToPcmFile } from './audio-mix'
 import { handle } from '../ipc/typed-handle'
@@ -66,6 +66,27 @@ function resolveOverlayFontFile(fontFamily: string | undefined, bold: boolean): 
   }
   logger.warn(`[Export] No font file for "${fontFamily}" — using the default font`)
   return undefined
+}
+
+/** Segments rendered per ffmpeg pass. Every segment is its own input, so one pass over a
+ *  long timeline overflows Windows' 32K command line (a 1,250-cut project did), and would
+ *  open a thousand files at once even if it fit. */
+const SEGMENTS_PER_PASS = Number(process.env.RIX_EXPORT_SEGMENTS_PER_PASS) || 40  // env: lets tests force a path
+/** Layers composited per ffmpeg pass: a layer is an input as well. */
+const LAYERS_PER_PASS = 30
+
+/** Split the program into passes of about SEGMENTS_PER_PASS, never inside a dissolve (it
+ *  overlaps the two segments either side of the join, so they must render together). */
+function splitIntoPasses(segments: FlatSegment[]): FlatSegment[][] {
+  const dissolveAfter = new Set(findDissolveBoundaries(segments).map(b => b.index))
+  const passes: FlatSegment[][] = []
+  let current: FlatSegment[] = []
+  segments.forEach((segment, i) => {
+    current.push(segment)
+    if (current.length >= SEGMENTS_PER_PASS && !dissolveAfter.has(i)) { passes.push(current); current = [] }
+  })
+  if (current.length > 0) passes.push(current)
+  return passes
 }
 
 export type ExportNativeInput = z.infer<typeof electronAPISchemas.exportNative.input>
@@ -140,35 +161,124 @@ export async function exportTimelineNative(
   const ts = Date.now()
   const tmpVideo = path.join(tmpDir, `ltx-export-video-${ts}.mkv`)
   const tmpAudio = path.join(tmpDir, `ltx-export-audio-${ts}.wav`)
+  // Intermediates of a multi-pass video render (see SEGMENTS_PER_PASS).
+  const passTmp: string[] = []
   const cleanup = () => {
     try { fs.unlinkSync(tmpVideo) } catch {}
     try { fs.unlinkSync(tmpAudio) } catch {}
+    for (const f of passTmp) { try { fs.unlinkSync(f) } catch {} }
   }
 
   try {
     logger.info( `[Export] Step 1: Video-only export (${segments.length} segments, ${layers.length} layers)`)
     {
       const fontFile = resolveExportFont()
-      const { inputs, filterScript } = buildVideoFilterGraph(segments, {
+      const graphOpts = {
         width, height, fps, letterbox, subtitles, textOverlays, fontFile, vertical, layers,
         resolveFontFile: resolveOverlayFontFile,
-      })
+      }
+      const finalEncode = preview ? ['-preset', 'ultrafast', '-crf', '28'] : ['-preset', 'fast', '-crf', '16']
 
-      const filterFile = path.join(tmpDir, `ltx-filter-v-${ts}.txt`)
-      fs.writeFileSync(filterFile, filterScript, 'utf8')
+      let graphFileCount = 0
+      const runGraph = async (inputs: string[], filterScript: string, outFile: string, encode: string[], onTime: (t: number) => void, constantRate = false) => {
+        const filterFile = path.join(tmpDir, `ltx-filter-v-${ts}-${graphFileCount++}.txt`)
+        fs.writeFileSync(filterFile, filterScript, 'utf8')
+        const result = await runFfmpeg(ffmpegPath, [
+          '-y', ...inputs, '-filter_complex_script', filterFile,
+          '-map', '[outv]', '-an', '-c:v', 'libx264', ...encode, '-pix_fmt', 'yuv420p',
+          // The joined pieces carry millisecond mkv timestamps, which don't divide evenly into
+          // frames at 24 fps; re-encoding them as-is leaves the mp4 with colliding timestamps
+          // and the mux drops a few frames. Regenerate regular ones.
+          ...(constantRate ? ['-fps_mode', 'cfr', '-r', String(fps)] : []),
+          outFile,
+        ], onTime)
+        try { fs.unlinkSync(filterFile) } catch {}
+        return result
+      }
 
       emitProgress(0, 'Encoding video')
-      const r = await runFfmpeg(ffmpegPath, [
-        '-y', ...inputs, '-filter_complex_script', filterFile,
-        '-map', '[outv]', '-an', '-c:v', 'libx264',
-        ...(preview ? ['-preset', 'ultrafast', '-crf', '28'] : ['-preset', 'fast', '-crf', '16']),
-        '-pix_fmt', 'yuv420p', tmpVideo
-      ], (t) => {
-        const frac = totalDur > 0 ? t / totalDur : 0
-        emitProgress(frac * VIDEO_SHARE, 'Encoding video')
-      })
-      try { fs.unlinkSync(filterFile) } catch {}
-      if (!r.success) { cleanup(); return { success: false, error: r.error } }
+      if (segments.length <= SEGMENTS_PER_PASS) {
+        const { inputs, filterScript } = buildVideoFilterGraph(segments, graphOpts)
+        const r = await runGraph(inputs, filterScript, tmpVideo, finalEncode, (t) => {
+          emitProgress((totalDur > 0 ? t / totalDur : 0) * VIDEO_SHARE, 'Encoding video')
+        })
+        if (!r.success) { cleanup(); return { success: false, error: r.error } }
+      } else {
+        // Long timeline: render the segments in passes, join the pieces losslessly, then
+        // apply the letterbox/layers/titles/subtitles over the whole joined program in one
+        // pass of their own (they're placed by program time, so they can't be split).
+        const passes = splitIntoPasses(segments)
+        const needsOverlayPass = Boolean(letterbox) || layers.length > 0
+          || (textOverlays?.length ?? 0) > 0 || (subtitles?.length ?? 0) > 0
+        const segmentShare = needsOverlayPass ? 0.6 : 1
+        // Pieces that get re-encoded by the overlay pass are kept near-lossless, so that
+        // second generation doesn't show.
+        const pieceEncode = needsOverlayPass ? ['-preset', 'veryfast', '-crf', '10'] : finalEncode
+        logger.info(`[Export] Long timeline: ${segments.length} segments in ${passes.length} passes${needsOverlayPass ? ' + overlay pass' : ''}`)
+
+        const pieces: { file: string; frames: number }[] = []
+        let doneDur = 0
+        let doneFrames = 0
+        for (const [pi, pass] of passes.entries()) {
+          const piece = path.join(tmpDir, `ltx-export-piece-${ts}-${pi}.mkv`)
+          passTmp.push(piece)
+          const passDur = computeFinalVideoDuration(pass)
+          // Each piece gets the frames between its start and end on the whole program's
+          // frame grid (rounding the running total, not each piece), so the pieces add up to
+          // the program exactly instead of drifting by a fraction of a frame per piece.
+          const frameCount = Math.max(1, Math.round((doneDur + passDur) * fps) - doneFrames)
+          const g = buildVideoFilterGraph(pass, { width, height, fps, vertical, stage: 'segments', frameCount })
+          doneFrames += frameCount
+          const r = await runGraph(g.inputs, g.filterScript, piece, pieceEncode, (t) => {
+            const frac = totalDur > 0 ? (doneDur + Math.min(t, passDur)) / totalDur : 0
+            emitProgress(frac * VIDEO_SHARE * segmentShare, `Encoding video (part ${pi + 1}/${passes.length})`)
+          })
+          if (!r.success) { cleanup(); return { success: false, error: r.error } }
+          pieces.push({ file: piece, frames: frameCount })
+          doneDur += passDur
+        }
+
+        const joined = needsOverlayPass ? path.join(tmpDir, `ltx-export-joined-${ts}.mkv`) : tmpVideo
+        if (needsOverlayPass) passTmp.push(joined)
+        const listFile = path.join(tmpDir, `ltx-export-pieces-${ts}.txt`)
+        passTmp.push(listFile)
+        // Explicit durations: left to read them off each file, the concat demuxer lands the
+        // next piece a frame early or late and the join drops or doubles a frame.
+        fs.writeFileSync(listFile, pieces.map(({ file, frames }) => (
+          `file '${file.replace(/\\/g, '/').replace(/'/g, "'\\''")}'\nduration ${(frames / fps).toFixed(6)}`
+        )).join('\n'), 'utf8')
+        const joinResult = await runFfmpeg(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', joined])
+        if (!joinResult.success) { cleanup(); return { success: false, error: joinResult.error } }
+
+        if (needsOverlayPass) {
+          // Every layer is an input too, so they go on in batches, bottom of the stack first,
+          // each batch over the last one's result. The letterbox goes under the first batch
+          // (as in a single pass) and the titles and subtitles on top of the last.
+          const batches: OverlayLayer[][] = []
+          for (let i = 0; i < layers.length; i += LAYERS_PER_PASS) batches.push(layers.slice(i, i + LAYERS_PER_PASS))
+          if (batches.length === 0) batches.push([])
+          let source = joined
+          for (const [bi, batch] of batches.entries()) {
+            const isLast = bi === batches.length - 1
+            const target = isLast ? tmpVideo : path.join(tmpDir, `ltx-export-overlay-${ts}-${bi}.mkv`)
+            if (!isLast) passTmp.push(target)
+            const g = buildVideoFilterGraph(segments, {
+              ...graphOpts,
+              stage: 'overlay', baseInput: source, layers: batch,
+              letterbox: bi === 0 ? letterbox : undefined,
+              textOverlays: isLast ? textOverlays : undefined,
+              subtitles: isLast ? subtitles : undefined,
+            })
+            const r = await runGraph(g.inputs, g.filterScript, target, isLast ? finalEncode : pieceEncode, (t) => {
+              const frac = totalDur > 0 ? t / totalDur : 0
+              emitProgress(VIDEO_SHARE * (segmentShare + ((bi + frac) / batches.length) * (1 - segmentShare)), 'Adding titles and layers')
+            }, true)
+            if (!r.success) { cleanup(); return { success: false, error: r.error } }
+            source = target
+          }
+        }
+        for (const { file } of pieces) { try { fs.unlinkSync(file) } catch {} }
+      }
     }
 
     emitProgress(VIDEO_SHARE, 'Mixing audio')

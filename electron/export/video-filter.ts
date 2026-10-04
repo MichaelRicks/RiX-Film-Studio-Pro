@@ -548,9 +548,27 @@ export function buildVideoFilterGraph(
     vertical?: boolean;
     /** Graphics composited over the program — see buildOverlayLayers. */
     layers?: OverlayLayer[];
+    /**
+     * A single ffmpeg pass can't take a very long timeline (one input per segment overflows
+     * the command line), so a big export renders in two kinds of pass over the same program:
+     *  - 'segments': only the per-segment content, concatenated — no letterbox/layers/text;
+     *  - 'overlay': one pre-rendered `baseInput` (the program so far) plus the letterbox,
+     *    layers, titles and subtitles. `segments` is still the whole program here: titles
+     *    and layers are placed by program time against it.
+     * Default 'all' is the whole graph in one pass.
+     */
+    stage?: 'all' | 'segments' | 'overlay';
+    baseInput?: string;
+    /**
+     * 'segments' stage only: render exactly this many frames. The `fps` filter drops the last
+     * frame of whatever it renders, harmless once but it adds up across many pieces, so a
+     * piece is padded and trimmed to a count the caller works out from the whole program.
+     */
+    frameCount?: number;
   },
 ): { inputs: string[]; filterScript: string } {
   const { width, height, fps, letterbox, subtitles, textOverlays, fontFile, resolveFontFile, vertical, layers } = opts
+  const stage = opts.stage ?? 'all'
   // Text sizes are authored against a 1080-line 16:9 frame. A 16:9 export scales
   // by its height. A 9:16 export instead maps each title through the shot's 9:16
   // window (see verticalTextMap) — the picture is blown up to fill it, so the
@@ -566,355 +584,374 @@ export function buildVideoFilterGraph(
   const inputs: string[] = []
   const filterParts: string[] = []
   let idx = 0
+  let lastLabel = 'fpsout'
 
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]
-
-    const contentLabel = `v${i}c`
-
-    if (seg.type === 'gap') {
-      // Gap: generate black frames at target fps (synthetic input)
-      inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${width}x${height}:r=${fps}:d=${seg.duration.toFixed(6)}`)
-      filterParts.push(`[${idx}:v]setsar=1[${contentLabel}]`)
-      idx++
-    } else if (seg.type === 'image') {
-      // Image: loop for exact duration, use target fps for frame generation
-      inputs.push('-loop', '1', '-framerate', String(fps), '-t', seg.duration.toFixed(6), '-i', seg.filePath)
-      let chain = `[${idx}:v]${vertical ? `${buildReframeCrop(seg, seg.offsetInClip)},` : ''}scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:-1:-1:color=black,setsar=1`
-      if (seg.flipH) chain += ',hflip'
-      if (seg.flipV) chain += ',vflip'
-      chain += buildGradingFilters(seg, seg.duration)
-      chain += `[${contentLabel}]`
-      filterParts.push(chain)
-      idx++
-    } else {
-      // Video: trim -> speed -> scale, NO per-segment fps conversion
-      // (fps is applied ONCE after concat to avoid per-segment duration quantization)
-      const trimEnd = seg.trimStart + seg.duration * seg.speed
-      inputs.push('-i', seg.filePath)
-      let chain = `[${idx}:v]trim=start=${seg.trimStart.toFixed(6)}:end=${trimEnd.toFixed(6)},setpts=PTS-STARTPTS`
-      // Crop before the speed change so `t` is still source time minus trimStart.
-      if (vertical) chain += `,${buildReframeCrop(seg, seg.trimStart)}`
-      if (seg.speed !== 1) chain += `,setpts=PTS/${seg.speed.toFixed(6)}`
-      if (seg.reversed) chain += ',reverse'
-      chain += `,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:-1:-1:color=black,setsar=1`
-      if (seg.flipH) chain += ',hflip'
-      if (seg.flipV) chain += ',vflip'
-      chain += buildGradingFilters(seg, seg.duration)
-      chain += `[${contentLabel}]`
-      filterParts.push(chain)
-      idx++
-    }
-
-    const wipe = applyWipeTransitions(contentLabel, seg, seg.duration, { width, height, fps }, idx)
-    if (wipe) {
-      inputs.push(...wipe.inputs)
-      filterParts.push(...wipe.filterLines)
-      idx = wipe.nextIdx
-      filterParts.push(`[${wipe.label}]null[v${i}]`)
-    } else {
-      filterParts.push(`[${contentLabel}]null[v${i}]`)
-    }
-  }
-
-  const dissolveBoundaries = findDissolveBoundaries(segments)
-
-  let lastLabel: string
-  if (dissolveBoundaries.length === 0) {
-    // No dissolves: concat all segments in one pass, then apply fps ONCE to
-    // the entire output. This is how real NLEs work - frame rate conversion
-    // happens globally, not per-clip, so per-segment duration quantization
-    // doesn't accumulate.
-    const concatInputs = segments.map((_, i) => `[v${i}]`).join('')
-    lastLabel = 'fpsout'
-    filterParts.push(`${concatInputs}concat=n=${segments.length}:v=1:a=0[concatraw]`)
-    filterParts.push(`[concatraw]fps=${fps}[${lastLabel}]`)
+  if (stage === 'overlay') {
+    inputs.push('-i', opts.baseInput!)
+    filterParts.push(`[0:v]null[${lastLabel}]`)
+    idx = 1
   } else {
-    // At least one dissolve: xfade blends two streams frame-for-frame, which
-    // needs matched timing, so every segment gets fps-normalized up front
-    // instead of once at the end. Segments combine left-to-right through an
-    // accumulator, using xfade at dissolve boundaries (which - like the
-    // editor's own preview - overlaps the tail of one clip with the head of
-    // the next, shrinking total duration by the dissolve's length) and plain
-    // concat everywhere else.
-    //
-    // xfade's "dissolve" transition is a misnomer for what this app (and
-    // every mainstream NLE) means by dissolve: it's a randomized pixel
-    // dither, not a smooth cross-fade - confirmed by blending solid red and
-    // blue test frames at 50%: "dissolve" produced visibly speckled
-    // red/blue pixels, not a uniform blend. xfade's "fade" is the one that
-    // actually does a plain linear alpha blend (verified: uniform purple at
-    // 50%), matching the editor's own opacity-based preview.
-    const XFADE_DISSOLVE_TYPE = 'fade'
-    const dissolveDurationAfter = new Map(dissolveBoundaries.map(b => [b.index, b.duration]))
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
 
-    filterParts.push(`[v0]fps=${fps}[vacc0]`)
-    let accLabel = 'vacc0'
-    let accDuration = segments[0].duration
+      const contentLabel = `v${i}c`
 
-    for (let i = 1; i < segments.length; i++) {
-      const segFpsLabel = `v${i}fps`
-      filterParts.push(`[v${i}]fps=${fps}[${segFpsLabel}]`)
-
-      const nextAccLabel = `vacc${i}`
-      const dissolveDuration = dissolveDurationAfter.get(i - 1)
-      if (dissolveDuration !== undefined) {
-        const offset = Math.max(0, accDuration - dissolveDuration)
-        filterParts.push(
-          `[${accLabel}][${segFpsLabel}]xfade=transition=${XFADE_DISSOLVE_TYPE}:duration=${dissolveDuration.toFixed(4)}:offset=${offset.toFixed(4)}[${nextAccLabel}]`,
-        )
-        accDuration = accDuration + segments[i].duration - dissolveDuration
+      if (seg.type === 'gap') {
+        // Gap: generate black frames at target fps (synthetic input)
+        inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${width}x${height}:r=${fps}:d=${seg.duration.toFixed(6)}`)
+        filterParts.push(`[${idx}:v]setsar=1[${contentLabel}]`)
+        idx++
+      } else if (seg.type === 'image') {
+        // Image: loop for exact duration, use target fps for frame generation
+        inputs.push('-loop', '1', '-framerate', String(fps), '-t', seg.duration.toFixed(6), '-i', seg.filePath)
+        let chain = `[${idx}:v]${vertical ? `${buildReframeCrop(seg, seg.offsetInClip)},` : ''}scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:-1:-1:color=black,setsar=1`
+        if (seg.flipH) chain += ',hflip'
+        if (seg.flipV) chain += ',vflip'
+        chain += buildGradingFilters(seg, seg.duration)
+        chain += `[${contentLabel}]`
+        filterParts.push(chain)
+        idx++
       } else {
-        filterParts.push(`[${accLabel}][${segFpsLabel}]concat=n=2:v=1:a=0[${nextAccLabel}]`)
-        accDuration = accDuration + segments[i].duration
+        // Video: trim -> speed -> scale, NO per-segment fps conversion
+        // (fps is applied ONCE after concat to avoid per-segment duration quantization)
+        const trimEnd = seg.trimStart + seg.duration * seg.speed
+        inputs.push('-i', seg.filePath)
+        let chain = `[${idx}:v]trim=start=${seg.trimStart.toFixed(6)}:end=${trimEnd.toFixed(6)},setpts=PTS-STARTPTS`
+        // Crop before the speed change so `t` is still source time minus trimStart.
+        if (vertical) chain += `,${buildReframeCrop(seg, seg.trimStart)}`
+        if (seg.speed !== 1) chain += `,setpts=PTS/${seg.speed.toFixed(6)}`
+        if (seg.reversed) chain += ',reverse'
+        chain += `,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:-1:-1:color=black,setsar=1`
+        if (seg.flipH) chain += ',hflip'
+        if (seg.flipV) chain += ',vflip'
+        chain += buildGradingFilters(seg, seg.duration)
+        chain += `[${contentLabel}]`
+        filterParts.push(chain)
+        idx++
       }
-      accLabel = nextAccLabel
+
+      const wipe = applyWipeTransitions(contentLabel, seg, seg.duration, { width, height, fps }, idx)
+      if (wipe) {
+        inputs.push(...wipe.inputs)
+        filterParts.push(...wipe.filterLines)
+        idx = wipe.nextIdx
+        filterParts.push(`[${wipe.label}]null[v${i}]`)
+      } else {
+        filterParts.push(`[${contentLabel}]null[v${i}]`)
+      }
     }
 
-    lastLabel = 'fpsout'
-    filterParts.push(`[${accLabel}]null[${lastLabel}]`)
-  }
+    const dissolveBoundaries = findDissolveBoundaries(segments)
 
-  // Letterbox overlay (drawbox)
-  if (letterbox) {
-    const containerRatio = width / height
-    const targetRatio = letterbox.ratio
-    const hexColor = letterbox.color.replace('#', '')
-    const alphaHex = Math.round(letterbox.opacity * 255).toString(16).padStart(2, '0')
-    const colorStr = `0x${hexColor}${alphaHex}`
-    const nextLabel = 'lbout'
-
-    if (targetRatio >= containerRatio) {
-      // Letterbox: bars on top and bottom
-      const visibleH = Math.round(width / targetRatio)
-      const barH = Math.round((height - visibleH) / 2)
-      if (barH > 0) {
-        filterParts.push(`[${lastLabel}]drawbox=x=0:y=0:w=iw:h=${barH}:c=${colorStr}:t=fill,drawbox=x=0:y=ih-${barH}:w=iw:h=${barH}:c=${colorStr}:t=fill[${nextLabel}]`)
-        lastLabel = nextLabel
-      }
+    if (dissolveBoundaries.length === 0) {
+      // No dissolves: concat all segments in one pass, then apply fps ONCE to
+      // the entire output. This is how real NLEs work - frame rate conversion
+      // happens globally, not per-clip, so per-segment duration quantization
+      // doesn't accumulate.
+      const concatInputs = segments.map((_, i) => `[v${i}]`).join('')
+      lastLabel = 'fpsout'
+      filterParts.push(`${concatInputs}concat=n=${segments.length}:v=1:a=0[concatraw]`)
+      filterParts.push(opts.frameCount
+        ? `[concatraw]tpad=stop_mode=clone:stop=2,fps=${fps}[${lastLabel}]`
+        : `[concatraw]fps=${fps}[${lastLabel}]`)
     } else {
-      // Pillarbox: bars on left and right
-      const visibleW = Math.round(height * targetRatio)
-      const barW = Math.round((width - visibleW) / 2)
-      if (barW > 0) {
-        filterParts.push(`[${lastLabel}]drawbox=x=0:y=0:w=${barW}:h=ih:c=${colorStr}:t=fill,drawbox=x=iw-${barW}:y=0:w=${barW}:h=ih:c=${colorStr}:t=fill[${nextLabel}]`)
-        lastLabel = nextLabel
+      // At least one dissolve: xfade blends two streams frame-for-frame, which
+      // needs matched timing, so every segment gets fps-normalized up front
+      // instead of once at the end. Segments combine left-to-right through an
+      // accumulator, using xfade at dissolve boundaries (which - like the
+      // editor's own preview - overlaps the tail of one clip with the head of
+      // the next, shrinking total duration by the dissolve's length) and plain
+      // concat everywhere else.
+      //
+      // xfade's "dissolve" transition is a misnomer for what this app (and
+      // every mainstream NLE) means by dissolve: it's a randomized pixel
+      // dither, not a smooth cross-fade - confirmed by blending solid red and
+      // blue test frames at 50%: "dissolve" produced visibly speckled
+      // red/blue pixels, not a uniform blend. xfade's "fade" is the one that
+      // actually does a plain linear alpha blend (verified: uniform purple at
+      // 50%), matching the editor's own opacity-based preview.
+      const XFADE_DISSOLVE_TYPE = 'fade'
+      const dissolveDurationAfter = new Map(dissolveBoundaries.map(b => [b.index, b.duration]))
+
+      filterParts.push(`[v0]fps=${fps}[vacc0]`)
+      let accLabel = 'vacc0'
+      let accDuration = segments[0].duration
+
+      for (let i = 1; i < segments.length; i++) {
+        const segFpsLabel = `v${i}fps`
+        filterParts.push(`[v${i}]fps=${fps}[${segFpsLabel}]`)
+
+        const nextAccLabel = `vacc${i}`
+        const dissolveDuration = dissolveDurationAfter.get(i - 1)
+        if (dissolveDuration !== undefined) {
+          const offset = Math.max(0, accDuration - dissolveDuration)
+          filterParts.push(
+            `[${accLabel}][${segFpsLabel}]xfade=transition=${XFADE_DISSOLVE_TYPE}:duration=${dissolveDuration.toFixed(4)}:offset=${offset.toFixed(4)}[${nextAccLabel}]`,
+          )
+          accDuration = accDuration + segments[i].duration - dissolveDuration
+        } else {
+          filterParts.push(`[${accLabel}][${segFpsLabel}]concat=n=2:v=1:a=0[${nextAccLabel}]`)
+          accDuration = accDuration + segments[i].duration
+        }
+        accLabel = nextAccLabel
+      }
+
+      lastLabel = 'fpsout'
+      filterParts.push(`[${accLabel}]null[${lastLabel}]`)
+    }
+    }
+
+  if (stage === 'segments' && opts.frameCount) {
+    // Pad with clones of the true last frame (each per-segment fps in the dissolve path can
+    // also lose one), then cut to the exact count.
+    const pad = segments.length + 2
+    filterParts.push(`[${lastLabel}]tpad=stop_mode=clone:stop=${pad},trim=end_frame=${opts.frameCount},setpts=PTS-STARTPTS[fixedfps]`)
+    lastLabel = 'fixedfps'
+  }
+
+  if (stage !== 'segments') {
+    // Letterbox overlay (drawbox)
+    if (letterbox) {
+      const containerRatio = width / height
+      const targetRatio = letterbox.ratio
+      const hexColor = letterbox.color.replace('#', '')
+      const alphaHex = Math.round(letterbox.opacity * 255).toString(16).padStart(2, '0')
+      const colorStr = `0x${hexColor}${alphaHex}`
+      const nextLabel = 'lbout'
+
+      if (targetRatio >= containerRatio) {
+        // Letterbox: bars on top and bottom
+        const visibleH = Math.round(width / targetRatio)
+        const barH = Math.round((height - visibleH) / 2)
+        if (barH > 0) {
+          filterParts.push(`[${lastLabel}]drawbox=x=0:y=0:w=iw:h=${barH}:c=${colorStr}:t=fill,drawbox=x=0:y=ih-${barH}:w=iw:h=${barH}:c=${colorStr}:t=fill[${nextLabel}]`)
+          lastLabel = nextLabel
+        }
+      } else {
+        // Pillarbox: bars on left and right
+        const visibleW = Math.round(height * targetRatio)
+        const barW = Math.round((width - visibleW) / 2)
+        if (barW > 0) {
+          filterParts.push(`[${lastLabel}]drawbox=x=0:y=0:w=${barW}:h=ih:c=${colorStr}:t=fill,drawbox=x=iw-${barW}:y=0:w=${barW}:h=ih:c=${colorStr}:t=fill[${nextLabel}]`)
+          lastLabel = nextLabel
+        }
       }
     }
-  }
 
-  // Layer clips (logos, graphics, PiP) composited over the flattened program.
-  if (layers && layers.length > 0) {
-    const built = buildOverlayLayers(layers, lastLabel, idx, {
-      width, height, fps, segments, vertical, toProgramTime,
-    })
-    inputs.push(...built.inputs)
-    filterParts.push(...built.filterLines)
-    idx = built.nextIdx
-    lastLabel = built.label
-  }
+    // Layer clips (logos, graphics, PiP) composited over the flattened program.
+    if (layers && layers.length > 0) {
+      const built = buildOverlayLayers(layers, lastLabel, idx, {
+        width, height, fps, segments, vertical, toProgramTime,
+      })
+      inputs.push(...built.inputs)
+      filterParts.push(...built.filterLines)
+      idx = built.nextIdx
+      lastLabel = built.label
+    }
 
-  // Text-overlay burn-in (drawtext) — the type:'text' clips with a textStyle.
-  // The live preview renders these as DOM; export mirrors position/size/color so
-  // the baked video matches. Letter-spacing and shadow blur aren't representable
-  // in drawtext and are dropped; explicit newlines are preserved (no auto-wrap —
-  // the preview doesn't wrap either). Opacity keyframes ride drawtext's alpha;
-  // a non-uniform stretch draws the text on a transparent full-frame layer, scales
-  // that layer, and overlays it centered on the text's anchor point.
-  if (textOverlays && textOverlays.length > 0) {
-    for (let ti = 0; ti < textOverlays.length; ti++) {
-      const ov = textOverlays[ti]
-      const s = ov.style
-      const nextLabel = `txt${ti}`
-      // 9:16: place and size through the shot's window; else plain frame fractions.
-      // Nominal in, because the windows are picked against the segments' own clock.
-      const vmap = vertical
-        ? verticalTextMap(segments, ov.startTime, ov.endTime, width, height, toProgramTime)
-        : null
-      const ovStart = toProgramTime(ov.startTime)
-      const ovEnd = ovStart + Math.max(0.0001, ov.endTime - ov.startTime)
-      const hf = vmap ? vmap.scale : textScale // style px (authored against 1080p) → export px
-      const keyed = Boolean(ov.opacityKeyframes && ov.opacityKeyframes.length > 0)
-      const sx = s.scaleX && s.scaleX > 0 ? s.scaleX : 1
-      const sy = s.scaleY && s.scaleY > 0 ? s.scaleY : 1
-      const stretched = Math.abs(sx - 1) > 1e-3 || Math.abs(sy - 1) > 1e-3
-      // Static opacity is baked into the colors; keyed opacity moves to the alpha
-      // expr, and a stretched title gets its opacity on the layer instead.
-      const gA = keyed || stretched ? 1 : Math.max(0, Math.min(1, (s.opacity ?? 100) / 100))
-      const fontSize = Math.max(1, Math.round(s.fontSize * hf))
-      const fontColor = cssColorToFfmpeg(s.color, gA) ?? `white@${gA.toFixed(3)}`
+    // Text-overlay burn-in (drawtext) — the type:'text' clips with a textStyle.
+    // The live preview renders these as DOM; export mirrors position/size/color so
+    // the baked video matches. Letter-spacing and shadow blur aren't representable
+    // in drawtext and are dropped; explicit newlines are preserved (no auto-wrap —
+    // the preview doesn't wrap either). Opacity keyframes ride drawtext's alpha;
+    // a non-uniform stretch draws the text on a transparent full-frame layer, scales
+    // that layer, and overlays it centered on the text's anchor point.
+    if (textOverlays && textOverlays.length > 0) {
+      for (let ti = 0; ti < textOverlays.length; ti++) {
+        const ov = textOverlays[ti]
+        const s = ov.style
+        const nextLabel = `txt${ti}`
+        // 9:16: place and size through the shot's window; else plain frame fractions.
+        // Nominal in, because the windows are picked against the segments' own clock.
+        const vmap = vertical
+          ? verticalTextMap(segments, ov.startTime, ov.endTime, width, height, toProgramTime)
+          : null
+        const ovStart = toProgramTime(ov.startTime)
+        const ovEnd = ovStart + Math.max(0.0001, ov.endTime - ov.startTime)
+        const hf = vmap ? vmap.scale : textScale // style px (authored against 1080p) → export px
+        const keyed = Boolean(ov.opacityKeyframes && ov.opacityKeyframes.length > 0)
+        const sx = s.scaleX && s.scaleX > 0 ? s.scaleX : 1
+        const sy = s.scaleY && s.scaleY > 0 ? s.scaleY : 1
+        const stretched = Math.abs(sx - 1) > 1e-3 || Math.abs(sy - 1) > 1e-3
+        // Static opacity is baked into the colors; keyed opacity moves to the alpha
+        // expr, and a stretched title gets its opacity on the layer instead.
+        const gA = keyed || stretched ? 1 : Math.max(0, Math.min(1, (s.opacity ?? 100) / 100))
+        const fontSize = Math.max(1, Math.round(s.fontSize * hf))
+        const fontColor = cssColorToFfmpeg(s.color, gA) ?? `white@${gA.toFixed(3)}`
 
-      // Preview positions the box's CENTER at (positionX%, positionY%); mirror that.
-      const px = Math.max(0, Math.min(1, (s.positionX ?? 50) / 100))
-      const py = Math.max(0, Math.min(1, (s.positionY ?? 50) / 100))
+        // Preview positions the box's CENTER at (positionX%, positionY%); mirror that.
+        const px = Math.max(0, Math.min(1, (s.positionX ?? 50) / 100))
+        const py = Math.max(0, Math.min(1, (s.positionY ?? 50) / 100))
 
-      const parts: string[] = []
-      const bold = s.fontWeight === 'bold' || Number(s.fontWeight) >= 600
-      const overlayFont = resolveFontFile?.(s.fontFamily, bold) ?? fontFile
-      if (overlayFont) parts.push(fontFileArg(overlayFont))
-      parts.push(`text='${escapeDrawtext(ov.text)}'`)
-      if (ov.text.includes('\n')) parts.push(`text_align=${drawtextAlign(s.textAlign)}`)
-      parts.push(`fontsize=${fontSize}`)
-      parts.push(`fontcolor=${fontColor}`)
-      // Stretched: centered on its own layer (placed by the overlay below).
-      // Vertical: a program-time expression (commas escaped for drawtext).
-      const escC = (e: string) => e.replace(/,/g, '\\,')
-      parts.push(stretched ? 'x=(w-text_w)/2'
-        : vmap ? `x='${escC(vmap.centerX(px))}-text_w/2'` : `x=(w*${px.toFixed(4)})-(text_w/2)`)
-      parts.push(stretched ? 'y=(h-text_h)/2'
-        : vmap ? `y='${escC(vmap.centerY(py))}-text_h/2'` : `y=(h*${py.toFixed(4)})-(text_h/2)`)
+        const parts: string[] = []
+        const bold = s.fontWeight === 'bold' || Number(s.fontWeight) >= 600
+        const overlayFont = resolveFontFile?.(s.fontFamily, bold) ?? fontFile
+        if (overlayFont) parts.push(fontFileArg(overlayFont))
+        parts.push(`text='${escapeDrawtext(ov.text)}'`)
+        if (ov.text.includes('\n')) parts.push(`text_align=${drawtextAlign(s.textAlign)}`)
+        parts.push(`fontsize=${fontSize}`)
+        parts.push(`fontcolor=${fontColor}`)
+        // Stretched: centered on its own layer (placed by the overlay below).
+        // Vertical: a program-time expression (commas escaped for drawtext).
+        const escC = (e: string) => e.replace(/,/g, '\\,')
+        parts.push(stretched ? 'x=(w-text_w)/2'
+          : vmap ? `x='${escC(vmap.centerX(px))}-text_w/2'` : `x=(w*${px.toFixed(4)})-(text_w/2)`)
+        parts.push(stretched ? 'y=(h-text_h)/2'
+          : vmap ? `y='${escC(vmap.centerY(py))}-text_h/2'` : `y=(h*${py.toFixed(4)})-(text_h/2)`)
 
-      if ((s.strokeWidth ?? 0) > 0) {
-        const strokeColor = cssColorToFfmpeg(s.strokeColor, gA)
-        if (strokeColor) {
-          parts.push(`borderw=${Math.max(1, Math.round(s.strokeWidth * hf))}`)
-          parts.push(`bordercolor=${strokeColor}`)
-        }
-      }
-
-      const shx = Math.round((s.shadowOffsetX ?? 0) * hf)
-      const shy = Math.round((s.shadowOffsetY ?? 0) * hf)
-      if (shx !== 0 || shy !== 0) {
-        const shadowColor = cssColorToFfmpeg(s.shadowColor, gA)
-        if (shadowColor) {
-          parts.push(`shadowx=${shx}`)
-          parts.push(`shadowy=${shy}`)
-          parts.push(`shadowcolor=${shadowColor}`)
-        }
-      }
-
-      const boxColor = cssColorToFfmpeg(s.backgroundColor, gA)
-      if (boxColor) {
-        parts.push('box=1')
-        parts.push(`boxcolor=${boxColor}`)
-        parts.push(`boxborderw=${Math.max(0, Math.round((s.padding ?? 0) * hf))}`)
-      }
-
-      // Opacity fade in/out via a time-based alpha expression (defaults 0.5s,
-      // each capped at half the overlay). Multiplies the drawtext alpha, so it
-      // rides on top of the style's own opacity. Commas escaped like `enable`.
-      const ovDur = ovEnd - ovStart
-      const fin = Math.min(ov.fadeIn ?? 0.5, ovDur / 2)
-      const fout = Math.min(ov.fadeOut ?? 0.5, ovDur / 2)
-      const ramps: string[] = []
-      if (fin > 0.001) ramps.push(`(t-${ovStart.toFixed(3)})/${fin.toFixed(3)}`)
-      if (fout > 0.001) ramps.push(`(${ovEnd.toFixed(3)}-t)/${fout.toFixed(3)}`)
-      const alphaTerms: string[] = []
-      if (ramps.length > 0) {
-        const inner = ramps.length === 2 ? `min(${ramps[0]}\\,${ramps[1]})` : ramps[0]
-        alphaTerms.push(`max(0\\,min(1\\,${inner}))`)
-      }
-      if (keyed) alphaTerms.push(`(${linearKeyExpr(ov.opacityKeyframes!, ovStart)})/100`)
-      // Drawn straight onto the video, drawtext's alpha is right. On the stretch
-      // layer it isn't (see below), so there the opacity is applied to the layer.
-      if (alphaTerms.length > 0 && !stretched) {
-        parts.push(`alpha='max(0\\,min(1\\,${alphaTerms.join('*')}))'`)
-      }
-
-      parts.push(`enable='between(t\\,${ovStart.toFixed(3)}\\,${ovEnd.toFixed(3)})'`)
-
-      if (stretched) {
-        // Transparent layer that only exists for the overlay's lifetime, shifted
-        // onto the program clock so drawtext's t / enable see program time.
-        //
-        // drawtext on an RGBA canvas writes PREMULTIPLIED color, and with alpha < 1
-        // it also squares the written alpha (measured: alpha 0.5 → stored 64/255),
-        // so a faded title nearly vanished. So: draw at full opacity (clean
-        // premultiplied coverage), unpremultiply to straight alpha, and apply the
-        // fade/keyframed opacity to the whole layer — one value per frame, pushed
-        // into colorchannelmixer's alpha gain by sendcmd.
-        const layer = `txtl${ti}`
-        // The text is drawn at its unstretched size, so a title squeezed to fit the
-        // frame is wider (or taller) than the frame before the squeeze. Size the
-        // canvas so it still comes out frame-sized after scaling, or drawtext crops
-        // the ends of the text at the canvas edge.
-        const canvasDim = (frame: number, stretch: number) => (
-          Math.min(8192, Math.ceil(frame / Math.min(1, stretch) / 2) * 2)
-        )
-        const canvasW = canvasDim(width, sx)
-        const canvasH = canvasDim(height, sy)
-        const opacityAt = (t: number) => {
-          const local = t - ovStart
-          let g = 1
-          if (fin > 0.001 && local < fin) g = Math.max(0, Math.min(1, local / fin))
-          if (fout > 0.001 && local > ovDur - fout) g = Math.min(g, Math.max(0, (ovDur - local) / fout))
-          const base = keyed ? linearKeyValue(ov.opacityKeyframes!, local) / 100 : Math.max(0, Math.min(1, (s.opacity ?? 100) / 100))
-          return Math.max(0, Math.min(1, g * base))
-        }
-        const cmds: string[] = []
-        let last = -1
-        const frames = Math.ceil(ovDur * fps) + 1
-        for (let f = 0; f < frames; f++) {
-          const t = ovStart + f / fps
-          const v = opacityAt(t)
-          if (Math.abs(v - last) > 0.002) {
-            cmds.push(`${t.toFixed(4)} colorchannelmixer@txo${ti} aa ${v.toFixed(4)}`)
-            last = v
+        if ((s.strokeWidth ?? 0) > 0) {
+          const strokeColor = cssColorToFfmpeg(s.strokeColor, gA)
+          if (strokeColor) {
+            parts.push(`borderw=${Math.max(1, Math.round(s.strokeWidth * hf))}`)
+            parts.push(`bordercolor=${strokeColor}`)
           }
         }
-        const first = opacityAt(ovStart)
-        const opacityStage = cmds.length > 1
-          ? `sendcmd=c='${cmds.join(';')}',colorchannelmixer@txo${ti}=aa=${first.toFixed(4)},`
-          : first < 0.999 ? `colorchannelmixer=aa=${first.toFixed(4)},` : ''
-        filterParts.push(
-          `color=c=black@0.0:s=${canvasW}x${canvasH}:r=${fps}:d=${ovDur.toFixed(6)},format=rgba,` +
-          `setpts=PTS+${ovStart.toFixed(6)}/TB,` +
-          `drawtext=${parts.join(':')},` +
-          `unpremultiply=inplace=1,` +
-          opacityStage +
-          `scale=w='trunc(iw*${sx.toFixed(4)})':h='trunc(ih*${sy.toFixed(4)})'[${layer}]`,
-        )
-        filterParts.push(
-          vmap
-            ? `[${lastLabel}][${layer}]overlay=x='${escC(vmap.centerX(px))}-w/2':y='${escC(vmap.centerY(py))}-h/2':eof_action=pass:format=auto[${nextLabel}]`
-            : `[${lastLabel}][${layer}]overlay=x='W*${px.toFixed(4)}-w/2':y='H*${py.toFixed(4)}-h/2':eof_action=pass:format=auto[${nextLabel}]`,
-        )
-      } else {
-        filterParts.push(`[${lastLabel}]drawtext=${parts.join(':')}[${nextLabel}]`)
+
+        const shx = Math.round((s.shadowOffsetX ?? 0) * hf)
+        const shy = Math.round((s.shadowOffsetY ?? 0) * hf)
+        if (shx !== 0 || shy !== 0) {
+          const shadowColor = cssColorToFfmpeg(s.shadowColor, gA)
+          if (shadowColor) {
+            parts.push(`shadowx=${shx}`)
+            parts.push(`shadowy=${shy}`)
+            parts.push(`shadowcolor=${shadowColor}`)
+          }
+        }
+
+        const boxColor = cssColorToFfmpeg(s.backgroundColor, gA)
+        if (boxColor) {
+          parts.push('box=1')
+          parts.push(`boxcolor=${boxColor}`)
+          parts.push(`boxborderw=${Math.max(0, Math.round((s.padding ?? 0) * hf))}`)
+        }
+
+        // Opacity fade in/out via a time-based alpha expression (defaults 0.5s,
+        // each capped at half the overlay). Multiplies the drawtext alpha, so it
+        // rides on top of the style's own opacity. Commas escaped like `enable`.
+        const ovDur = ovEnd - ovStart
+        const fin = Math.min(ov.fadeIn ?? 0.5, ovDur / 2)
+        const fout = Math.min(ov.fadeOut ?? 0.5, ovDur / 2)
+        const ramps: string[] = []
+        if (fin > 0.001) ramps.push(`(t-${ovStart.toFixed(3)})/${fin.toFixed(3)}`)
+        if (fout > 0.001) ramps.push(`(${ovEnd.toFixed(3)}-t)/${fout.toFixed(3)}`)
+        const alphaTerms: string[] = []
+        if (ramps.length > 0) {
+          const inner = ramps.length === 2 ? `min(${ramps[0]}\\,${ramps[1]})` : ramps[0]
+          alphaTerms.push(`max(0\\,min(1\\,${inner}))`)
+        }
+        if (keyed) alphaTerms.push(`(${linearKeyExpr(ov.opacityKeyframes!, ovStart)})/100`)
+        // Drawn straight onto the video, drawtext's alpha is right. On the stretch
+        // layer it isn't (see below), so there the opacity is applied to the layer.
+        if (alphaTerms.length > 0 && !stretched) {
+          parts.push(`alpha='max(0\\,min(1\\,${alphaTerms.join('*')}))'`)
+        }
+
+        parts.push(`enable='between(t\\,${ovStart.toFixed(3)}\\,${ovEnd.toFixed(3)})'`)
+
+        if (stretched) {
+          // Transparent layer that only exists for the overlay's lifetime, shifted
+          // onto the program clock so drawtext's t / enable see program time.
+          //
+          // drawtext on an RGBA canvas writes PREMULTIPLIED color, and with alpha < 1
+          // it also squares the written alpha (measured: alpha 0.5 → stored 64/255),
+          // so a faded title nearly vanished. So: draw at full opacity (clean
+          // premultiplied coverage), unpremultiply to straight alpha, and apply the
+          // fade/keyframed opacity to the whole layer — one value per frame, pushed
+          // into colorchannelmixer's alpha gain by sendcmd.
+          const layer = `txtl${ti}`
+          // The text is drawn at its unstretched size, so a title squeezed to fit the
+          // frame is wider (or taller) than the frame before the squeeze. Size the
+          // canvas so it still comes out frame-sized after scaling, or drawtext crops
+          // the ends of the text at the canvas edge.
+          const canvasDim = (frame: number, stretch: number) => (
+            Math.min(8192, Math.ceil(frame / Math.min(1, stretch) / 2) * 2)
+          )
+          const canvasW = canvasDim(width, sx)
+          const canvasH = canvasDim(height, sy)
+          const opacityAt = (t: number) => {
+            const local = t - ovStart
+            let g = 1
+            if (fin > 0.001 && local < fin) g = Math.max(0, Math.min(1, local / fin))
+            if (fout > 0.001 && local > ovDur - fout) g = Math.min(g, Math.max(0, (ovDur - local) / fout))
+            const base = keyed ? linearKeyValue(ov.opacityKeyframes!, local) / 100 : Math.max(0, Math.min(1, (s.opacity ?? 100) / 100))
+            return Math.max(0, Math.min(1, g * base))
+          }
+          const cmds: string[] = []
+          let last = -1
+          const frames = Math.ceil(ovDur * fps) + 1
+          for (let f = 0; f < frames; f++) {
+            const t = ovStart + f / fps
+            const v = opacityAt(t)
+            if (Math.abs(v - last) > 0.002) {
+              cmds.push(`${t.toFixed(4)} colorchannelmixer@txo${ti} aa ${v.toFixed(4)}`)
+              last = v
+            }
+          }
+          const first = opacityAt(ovStart)
+          const opacityStage = cmds.length > 1
+            ? `sendcmd=c='${cmds.join(';')}',colorchannelmixer@txo${ti}=aa=${first.toFixed(4)},`
+            : first < 0.999 ? `colorchannelmixer=aa=${first.toFixed(4)},` : ''
+          filterParts.push(
+            `color=c=black@0.0:s=${canvasW}x${canvasH}:r=${fps}:d=${ovDur.toFixed(6)},format=rgba,` +
+            `setpts=PTS+${ovStart.toFixed(6)}/TB,` +
+            `drawtext=${parts.join(':')},` +
+            `unpremultiply=inplace=1,` +
+            opacityStage +
+            `scale=w='trunc(iw*${sx.toFixed(4)})':h='trunc(ih*${sy.toFixed(4)})'[${layer}]`,
+          )
+          filterParts.push(
+            vmap
+              ? `[${lastLabel}][${layer}]overlay=x='${escC(vmap.centerX(px))}-w/2':y='${escC(vmap.centerY(py))}-h/2':eof_action=pass:format=auto[${nextLabel}]`
+              : `[${lastLabel}][${layer}]overlay=x='W*${px.toFixed(4)}-w/2':y='H*${py.toFixed(4)}-h/2':eof_action=pass:format=auto[${nextLabel}]`,
+          )
+        } else {
+          filterParts.push(`[${lastLabel}]drawtext=${parts.join(':')}[${nextLabel}]`)
+        }
+        lastLabel = nextLabel
       }
-      lastLabel = nextLabel
     }
-  }
 
-  // Subtitle burn-in (drawtext)
-  if (subtitles && subtitles.length > 0) {
-    for (let si = 0; si < subtitles.length; si++) {
-      const sub = subtitles[si]
-      const subStart = toProgramTime(sub.startTime)
-      const subEnd = subStart + Math.max(0.0001, sub.endTime - sub.startTime)
-      const nextLabel = `sub${si}`
-      // Escape text for ffmpeg drawtext (newlines stay raw, see escapeDrawtext).
-      const escapedText = escapeDrawtext(sub.text)
-      const alignPart = sub.text.includes('\n') ? ':text_align=C' : ''
+    // Subtitle burn-in (drawtext)
+    if (subtitles && subtitles.length > 0) {
+      for (let si = 0; si < subtitles.length; si++) {
+        const sub = subtitles[si]
+        const subStart = toProgramTime(sub.startTime)
+        const subEnd = subStart + Math.max(0.0001, sub.endTime - sub.startTime)
+        const nextLabel = `sub${si}`
+        // Escape text for ffmpeg drawtext (newlines stay raw, see escapeDrawtext).
+        const escapedText = escapeDrawtext(sub.text)
+        const alignPart = sub.text.includes('\n') ? ':text_align=C' : ''
 
-      const fontSize = Math.round(sub.style.fontSize * textScale) // scale relative to export res
-      const fontColor = sub.style.color.replace('#', '0x')
+        const fontSize = Math.round(sub.style.fontSize * textScale) // scale relative to export res
+        const fontColor = sub.style.color.replace('#', '0x')
 
-      // Y position based on style.position
-      let yExpr: string
-      if (sub.style.position === 'top') {
-        yExpr = '20'
-      } else if (sub.style.position === 'center') {
-        yExpr = '(h-text_h)/2'
-      } else {
-        yExpr = 'h-text_h-30'
+        // Y position based on style.position
+        let yExpr: string
+        if (sub.style.position === 'top') {
+          yExpr = '20'
+        } else if (sub.style.position === 'center') {
+          yExpr = '(h-text_h)/2'
+        } else {
+          yExpr = 'h-text_h-30'
+        }
+
+        // Background box
+        let boxPart = ''
+        if (sub.style.backgroundColor && sub.style.backgroundColor !== 'transparent') {
+          const bgHex = sub.style.backgroundColor.replace('#', '')
+          // Handle 8-char hex with alpha (e.g., 00000099)
+          const bgColor = bgHex.length > 6 ? `0x${bgHex.slice(0, 6)}` : `0x${bgHex}`
+          const bgAlpha = bgHex.length > 6 ? (parseInt(bgHex.slice(6), 16) / 255).toFixed(2) : '0.6'
+          boxPart = `:box=1:boxcolor=${bgColor}@${bgAlpha}:boxborderw=8`
+        }
+
+        const dtFilter = `drawtext=text='${escapedText}'${alignPart}:fontsize=${fontSize}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${yExpr}${boxPart}:enable='between(t\\,${subStart.toFixed(3)}\\,${subEnd.toFixed(3)})'`
+
+        filterParts.push(`[${lastLabel}]${dtFilter}[${nextLabel}]`)
+        lastLabel = nextLabel
       }
-
-      // Background box
-      let boxPart = ''
-      if (sub.style.backgroundColor && sub.style.backgroundColor !== 'transparent') {
-        const bgHex = sub.style.backgroundColor.replace('#', '')
-        // Handle 8-char hex with alpha (e.g., 00000099)
-        const bgColor = bgHex.length > 6 ? `0x${bgHex.slice(0, 6)}` : `0x${bgHex}`
-        const bgAlpha = bgHex.length > 6 ? (parseInt(bgHex.slice(6), 16) / 255).toFixed(2) : '0.6'
-        boxPart = `:box=1:boxcolor=${bgColor}@${bgAlpha}:boxborderw=8`
-      }
-
-      const dtFilter = `drawtext=text='${escapedText}'${alignPart}:fontsize=${fontSize}:fontcolor=${fontColor}:x=(w-text_w)/2:y=${yExpr}${boxPart}:enable='between(t\\,${subStart.toFixed(3)}\\,${subEnd.toFixed(3)})'`
-
-      filterParts.push(`[${lastLabel}]${dtFilter}[${nextLabel}]`)
-      lastLabel = nextLabel
     }
+
   }
 
   // Rename final label to outv

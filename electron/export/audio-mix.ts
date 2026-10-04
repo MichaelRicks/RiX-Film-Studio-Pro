@@ -147,7 +147,7 @@ export async function mixAudioToPcmFile(
   const totalSamples = totalFrames * NUM_CHANNELS
 
   // Extract each source once to disk; remember where it lands on the timeline.
-  interface Extracted { src: AudioSource; fd: number; startSample: number; numSamples: number }
+  interface Extracted { src: AudioSource; file: string; startSample: number; numSamples: number }
   const extracted: Extracted[] = []
   const tmpFiles: string[] = []
   try {
@@ -160,7 +160,7 @@ export async function mixAudioToPcmFile(
         const bytes = await extractPcmToFile(ffmpegPath, src.filePath, src.trimStart, src.trimEnd, src.speed, src.reversed, file)
         const numSamples = Math.floor(bytes / BYTES_PER_SAMPLE)
         const startFrame = Math.round(src.timelineStart * SAMPLE_RATE)
-        extracted.push({ src, fd: fs.openSync(file, 'r'), startSample: startFrame * NUM_CHANNELS, numSamples })
+        extracted.push({ src, file, startSample: startFrame * NUM_CHANNELS, numSamples })
         logger.info( `[Export] Audio ${i + 1}: extracted ${numSamples} samples (${(numSamples / SAMPLE_RATE / NUM_CHANNELS).toFixed(2)}s) at offset frame ${startFrame}`)
       } catch (err: any) {
         logger.warn( `[Export] Failed to extract audio from ${src.filePath}: ${err.message}`)
@@ -183,8 +183,10 @@ export async function mixAudioToPcmFile(
           const sTo = Math.min(numSamples, chunkEnd - startSample)
           if (sTo <= sFrom) continue
 
+          // Opened per read: a long timeline has a thousand sources, too many to hold open.
           const pcm = Buffer.alloc((sTo - sFrom) * BYTES_PER_SAMPLE)
-          fs.readSync(ex.fd, pcm, 0, pcm.length, sFrom * BYTES_PER_SAMPLE)
+          const fd = fs.openSync(ex.file, 'r')
+          try { fs.readSync(fd, pcm, 0, pcm.length, sFrom * BYTES_PER_SAMPLE) } finally { fs.closeSync(fd) }
 
           // Linear fade in/out envelope, in frames (a frame = NUM_CHANNELS samples).
           const clipFrames = Math.floor(numSamples / NUM_CHANNELS)
@@ -232,7 +234,6 @@ export async function mixAudioToPcmFile(
       fs.closeSync(outFd)
     }
   } finally {
-    for (const ex of extracted) { try { fs.closeSync(ex.fd) } catch { /* already closed */ } }
     for (const f of tmpFiles) { try { fs.unlinkSync(f) } catch { /* never created */ } }
   }
 

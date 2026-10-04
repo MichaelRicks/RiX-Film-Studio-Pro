@@ -63,6 +63,15 @@ export function runFfmpeg(
   onProgress?: (outTimeSec: number) => void,
 ): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
+    // Windows refuses a command line over 32,767 chars with a bare ENAMETOOLONG; say what
+    // actually happened. (Long timelines are split into passes well before this.)
+    const commandLength = ffmpegPath.length + args.reduce((n, a) => n + a.length + 3, 0)
+    if (process.platform === 'win32' && commandLength > 32000) {
+      const inputs = args.filter(a => a === '-i').length
+      logger.error(`[ffmpeg] command line too long (${commandLength} chars, ${inputs} inputs)`)
+      resolve({ success: false, error: `Export needs too many source files in one step (${inputs} inputs). Split the timeline into shorter sequences and export each.` })
+      return
+    }
     logger.info( `[ffmpeg] spawn: ${args.join(' ').slice(0, 400)}`)
     const proc = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
     activeExportProcess = proc
