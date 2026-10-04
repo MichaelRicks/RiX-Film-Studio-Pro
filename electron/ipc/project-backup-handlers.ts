@@ -5,10 +5,11 @@ import { logger } from '../logger'
 import { handle } from './typed-handle'
 
 /**
- * On-disk copy of each project record. The renderer keeps projects in
- * localStorage, which a bad shutdown can roll back or wipe; this writes the same
- * JSON next to the project's media (<project assets>/<projectId>/project.rix.json)
- * so Home can offer to restore whatever localStorage lost.
+ * On-disk project store: each project record is JSON next to its media
+ * (<project assets>/<projectId>/project.rix.json), plus the list order in
+ * .project-ids.json. The renderer loads it all at startup (loadProjectStore) and
+ * writes through; it used to live in localStorage (~5 MB quota, per-origin, rolled
+ * back by bad shutdowns), which is now only read once to migrate old data in.
  */
 
 export const PROJECT_BACKUP_FILE = 'project.rix.json'
@@ -27,6 +28,11 @@ const PROJECT_ID_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
 function backupPath(projectId: string): string {
   if (!PROJECT_ID_PATTERN.test(projectId)) throw new Error(`Invalid project id: ${projectId}`)
   return path.join(getProjectAssetsPath(), projectId, PROJECT_BACKUP_FILE)
+}
+
+// The user's project order (a JSON array of ids) next to the project folders.
+function projectIdsPath(): string {
+  return path.join(getProjectAssetsPath(), '.project-ids.json')
 }
 
 function deletedProjectsPath(): string {
@@ -143,6 +149,49 @@ export function registerProjectBackupHandlers(): void {
       if (!newest) return { success: false as const, error: 'No backup found' }
       return { success: true as const, data: fs.readFileSync(newest.file, 'utf-8') }
     } catch (error) {
+      return { success: false as const, error: String(error) }
+    }
+  })
+
+  handle('loadProjectStore', () => {
+    const projects: { projectId: string; data: string }[] = []
+    let ids: string[] | null = null
+    try {
+      const root = getProjectAssetsPath()
+      if (fs.existsSync(root)) {
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+          if (!entry.isDirectory() || !PROJECT_ID_PATTERN.test(entry.name)) continue
+          const newest = newestBackup(entry.name)
+          if (!newest) continue
+          try {
+            projects.push({ projectId: entry.name, data: fs.readFileSync(newest.file, 'utf-8') })
+          } catch (error) {
+            logger.warn(`Skipping unreadable project ${entry.name}: ${error}`)
+          }
+        }
+      }
+      const idsFile = projectIdsPath()
+      if (fs.existsSync(idsFile)) {
+        const parsed = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as unknown
+        if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === 'string')
+      }
+    } catch (error) {
+      logger.error(`Failed to load project store: ${error}`)
+    }
+    const deleted = Object.entries(readDeletedProjects()).map(([projectId, deletedAt]) => ({ projectId, deletedAt }))
+    return { ids, projects, deleted }
+  })
+
+  handle('saveProjectIds', ({ ids }) => {
+    try {
+      const file = projectIdsPath()
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      const tmp = `${file}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify(ids), 'utf-8')
+      fs.renameSync(tmp, file)
+      return { success: true as const }
+    } catch (error) {
+      logger.error(`Failed to save project ids: ${error}`)
       return { success: false as const, error: String(error) }
     }
   })

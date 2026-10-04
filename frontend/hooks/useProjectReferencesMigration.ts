@@ -4,10 +4,10 @@ import { projectReferenceSchema, projectSchema, type Project } from '../types/pr
 import {
   PROJECT_IDS_STORAGE_KEY,
   PROJECT_STORAGE_KEY_PREFIX,
-  getProjectStorageKey,
   readProject,
   readProjectIds,
   writeProjectIds,
+  writeRawProjectRecord,
 } from '../lib/project-storage'
 import { logger } from '../lib/logger'
 
@@ -62,10 +62,7 @@ export function readLegacyProjects(): LegacyProjectRecord[] {
 }
 
 export function writeRawProject(projectId: string, projectData: unknown): void {
-  localStorage.setItem(
-    getProjectStorageKey(projectId),
-    JSON.stringify(projectData),
-  )
+  writeRawProjectRecord(projectId, JSON.stringify(projectData))
 }
 
 export function deleteProjectIdsEntry(): void {

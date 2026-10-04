@@ -322,6 +322,20 @@ export const electronAPISchemas = {
     input: z.object({ projectId: z.string() }),
     output: ipcResult({ data: z.string() }),
   },
+  // Disk is the project store: everything on disk in one call at startup (newest
+  // record per project, the saved list order, and delete tombstones).
+  loadProjectStore: {
+    input: z.object({}),
+    output: z.object({
+      ids: z.array(z.string()).nullable(),
+      projects: z.array(z.object({ projectId: z.string(), data: z.string() })),
+      deleted: z.array(z.object({ projectId: z.string(), deletedAt: z.number() })),
+    }),
+  },
+  saveProjectIds: {
+    input: z.object({ ids: z.array(z.string()) }),
+    output: emptyResult,
+  },
   deleteProjectBackup: {
     input: z.object({ projectId: z.string() }),
     output: emptyResult,

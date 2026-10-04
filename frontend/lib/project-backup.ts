@@ -1,10 +1,11 @@
 import { logger } from './logger'
 
-// Mirrors each project record to a file in its project folder (see
-// electron/ipc/project-backup-handlers.ts). localStorage stays the source of
-// truth; the file exists so a project can be restored if localStorage loses it.
+// Writes each project record to a file in its project folder (see
+// electron/ipc/project-backup-handlers.ts). With the on-disk project store these
+// files ARE the saved projects (project-storage.ts keeps an in-memory copy), so the
+// debounce stays short.
 
-const BACKUP_DEBOUNCE_MS = 1000
+const BACKUP_DEBOUNCE_MS = 400
 
 export interface ProjectBackupInfo {
   projectId: string
@@ -35,6 +36,19 @@ export function scheduleProjectBackup(projectId: string, data: string): void {
   const existing = pending.get(projectId)
   if (existing) clearTimeout(existing.timer)
   pending.set(projectId, { data, timer: setTimeout(() => flush(projectId), BACKUP_DEBOUNCE_MS) })
+}
+
+/** Write a project to disk now and resolve whether it landed (used by the localStorage -> disk migration). */
+export async function saveProjectNow(projectId: string, data: string): Promise<boolean> {
+  const existing = pending.get(projectId)
+  if (existing) { clearTimeout(existing.timer); pending.delete(projectId) }
+  try {
+    const result = await api()?.saveProjectBackup({ projectId, data })
+    return !!result?.success
+  } catch (error) {
+    logger.error(`Project save failed for ${projectId}: ${error}`)
+    return false
+  }
 }
 
 /** Deleting a project removes its backup too, so it isn't offered for restore. */
