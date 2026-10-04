@@ -9,7 +9,6 @@ import {
   selectActiveTimelineOutPoint,
   selectClips,
   selectKeyboardCommandContext,
-  selectSelectedGap,
   selectSelectedSubtitleId,
   selectShuttleSpeed,
   selectTracks,
@@ -32,6 +31,8 @@ interface KeyboardRefs {
   centerOnPlayheadRef: React.MutableRefObject<boolean>
   getMinZoomRef: React.MutableRefObject<() => number>
   gapGenerateModeRef: React.MutableRefObject<'text-to-video' | 'image-to-video' | 'text-to-image' | null>
+  // The timeline panel owns the selected gap (local state, bridged out here); the editor store's selection.gap is never set.
+  selectedGapRef: React.MutableRefObject<unknown>
   clearSelectedGapRef: React.MutableRefObject<() => void>
   closeSelectedGapRef: React.MutableRefObject<() => void>
   fitToViewRef: React.MutableRefObject<() => void>
@@ -252,7 +253,7 @@ export function useEditorKeyboard(params: UseEditorKeyboardParams) {
               }
             }
             editorActions.deleteClips([...deleteIds])
-          } else if (selectSelectedGap(state)) {
+          } else if (refs.selectedGapRef.current) {
             refs.closeSelectedGapRef.current()
           } else if (selectSelectedSubtitleId(state)) {
             editorActions.deleteSubtitle(selectSelectedSubtitleId(state)!)

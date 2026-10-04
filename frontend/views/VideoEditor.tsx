@@ -623,6 +623,7 @@ function VideoEditorWithStore({
       centerOnPlayheadRef,
       getMinZoomRef,
       gapGenerateModeRef,
+      selectedGapRef,
       clearSelectedGapRef,
       closeSelectedGapRef,
       fitToViewRef,
