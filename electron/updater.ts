@@ -134,9 +134,12 @@ function syncMacSilentUpdates(): void {
 }
 
 export function initAutoUpdater(channel: UpdateChannel = 'latest'): void {
+  // Every release of this fork is published as a GitHub pre-release (tester phase). The
+  // "latest release" lookup skips pre-releases, so without this the feed always looks
+  // empty ("No update feed published yet") and an installed app never offers an update.
+  autoUpdater.allowPrerelease = true
   if (channel !== 'latest') {
     autoUpdater.channel = channel
-    autoUpdater.allowPrerelease = true
   }
 
   // Windows/Linux: user controls download and install. Mac: syncMacSilentUpdates.
