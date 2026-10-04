@@ -239,15 +239,29 @@ export function extractLastFrameToFile({ videoPath, outputPath, timeoutMs = 1500
  * if ffmpeg produces nothing usable — callers must treat that as "skip matching".
  */
 function averageRgb(ffmpegPath: string, inputPath: string, vf: string): [number, number, number] | null {
+  // 16-bit output (rgb48le): an 8-bit average snaps to whole levels, and the whole point
+  // here is to measure a 2-3/255 shift to a fraction of a level. Convert to RGB at full
+  // resolution BEFORE averaging: averaging the YUV planes first skips the per-pixel clip at
+  // black, which on a dark frame is worth over a level and no longer matches what's on screen.
   const result = spawnSync(
     ffmpegPath,
-    ['-v', 'error', '-i', inputPath, '-vf', `${vf},scale=1:1:flags=area`, '-frames:v', '1',
-     '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+    ['-v', 'error', '-i', inputPath, '-vf', `${vf},format=rgb24,scale=1:1:flags=area,format=rgb48le`, '-frames:v', '1',
+     '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-'],
     { maxBuffer: 1024 * 1024, timeout: 15000 },
   )
   const buf = result.stdout
-  if (!buf || buf.length < 3) return null
-  return [buf[0], buf[1], buf[2]]
+  if (!buf || buf.length < 6) return null
+  return [buf.readUInt16LE(0) / 257, buf.readUInt16LE(2) / 257, buf.readUInt16LE(4) / 257]
+}
+
+/** The clip's YUV conventions, read from ffmpeg's stream line: matrix (bt709 vs bt601) and range (tv vs pc). */
+function videoYuvConventions(ffmpegPath: string, videoPath: string): { bt709: boolean; fullRange: boolean } {
+  const result = spawnSync(ffmpegPath, ['-i', videoPath, '-hide_banner'], { encoding: 'utf8', timeout: 5000 })
+  const line = ((result.stdout || '') + (result.stderr || '')).split('\n').find(l => l.includes('Video:')) ?? ''
+  return {
+    bt709: /bt709/.test(line) || !/(bt470bg|smpte170m|bt601)/.test(line),
+    fullRange: /\(pc[,)]/.test(line),
+  }
 }
 
 // Cap per-channel correction: the systematic VAE darkening is ~2-3/255, so a
@@ -269,13 +283,24 @@ function colorMatchLutFilter(ffmpegPath: string, videoPath: string, referencePat
   if (!seed || !clip) return null
   const clamp = (v: number) => Math.max(-_MAX_COLOR_MATCH_OFFSET, Math.min(_MAX_COLOR_MATCH_OFFSET, v))
   const [dr, dg, db] = [clamp(seed[0] - clip[0]), clamp(seed[1] - clip[1]), clamp(seed[2] - clip[2])]
-  // Sub-level offsets are below what encode rounding would preserve -- skip the
-  // extra filter pass rather than apply a no-op.
-  if (Math.abs(dr) < 0.5 && Math.abs(dg) < 0.5 && Math.abs(db) < 0.5) return null
-  const r = dr.toFixed(1), g = dg.toFixed(1), b = db.toFixed(1)
-  logger.info(`[trim-first-frame] color-match offset r=${r} g=${g} b=${b} (seed=${seed} clip1=${clip})`)
-  // lutrgb clamps expression output to [0,255] itself, so no explicit clip() needed.
-  return `lutrgb=r=val+(${r}):g=val+(${g}):b=val+(${b})`
+  if (Math.abs(dr) < 0.1 && Math.abs(dg) < 0.1 && Math.abs(db) < 0.1) return null
+
+  // Apply the shift on the YUV planes themselves. Going through RGB (lutrgb) re-converts
+  // the matrix on the way back and lands ~1 level darker than asked, and an 8-bit LUT can
+  // only move by whole levels -- so do it at 12-bit, and let the final 8-bit conversion
+  // dither the fractions back in.
+  const { bt709, fullRange } = videoYuvConventions(ffmpegPath, videoPath)
+  const [kr, kb] = bt709 ? [0.2126, 0.0722] : [0.299, 0.114]
+  const kg = 1 - kr - kb
+  const dyFull = kr * dr + kg * dg + kb * db
+  const yScale = (fullRange ? 255 : 219) / 255
+  const cScale = (fullRange ? 255 : 224) / 255
+  const dY = dyFull * yScale
+  const dU = ((db - dyFull) / (2 * (1 - kb))) * cScale
+  const dV = ((dr - dyFull) / (2 * (1 - kr))) * cScale
+  const to12 = (v: number) => (v * 16).toFixed(3)  // 8-bit levels -> 12-bit levels
+  logger.info(`[trim-first-frame] color-match rgb offset r=${dr.toFixed(2)} g=${dg.toFixed(2)} b=${db.toFixed(2)} (seed=${seed.map(v => v.toFixed(2))} clip1=${clip.map(v => v.toFixed(2))}) -> yuv ${dY.toFixed(2)},${dU.toFixed(2)},${dV.toFixed(2)}`)
+  return `format=yuv420p12le,lutyuv=y=val+(${to12(dY)}):u=val+(${to12(dU)}):v=val+(${to12(dV)}),format=yuv420p`
 }
 
 /**
@@ -313,7 +338,9 @@ export function trimFirstFrameToFile({ videoPath, outputPath, colorMatchReferenc
     ...(hasAudio
       ? ['-af', `atrim=start=${(1 / fps).toFixed(6)},asetpts=PTS-STARTPTS`, '-c:a', 'aac', '-b:a', '192k']
       : ['-an']),
-    '-c:v', 'libx264', '-crf', '18', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    // High quality: this re-encodes an already-compressed clip, and a second generation at
+    // a looser setting adds its own blocking on top of the source's.
+    '-c:v', 'libx264', '-crf', '12', '-preset', 'medium', '-pix_fmt', 'yuv420p',
     '-y', outputPath,
   ]
   logger.info(`[trim-first-frame] ${args.join(' ').slice(0, 300)}`)

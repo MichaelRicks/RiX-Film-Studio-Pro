@@ -2743,6 +2743,16 @@ export function GenSpace() {
     if (persistedVideoKeyRef.current === generationKey) return
     persistedVideoKeyRef.current = generationKey
 
+    // A "Continue as new shot" output goes into the project already corrected (duplicate
+    // lead frame trimmed, tone matched to the source's last frame): the clip in the asset
+    // panel is the one that gets used, so it must be the one that joins seamlessly. The
+    // trim effect below then has nothing left to do for this output.
+    const continuationRun = continuationPendingRef.current && continuationProcessedRef.current !== videoPath
+    if (continuationRun) {
+      continuationPendingRef.current = false
+      continuationProcessedRef.current = videoPath
+    }
+
     const submission = generateSubmissionRef.current
     if (submission?.kind !== 'video') {
       logger.error('Video completed without a click-time submission; tagging from live picker state')
@@ -2776,7 +2786,19 @@ export function GenSpace() {
 
     ;(async () => {
       try {
-        const copied = await addVisualAssetToProject(videoPath, currentProjectId, 'video')
+        let sourcePath = videoPath
+        if (continuationRun) {
+          try {
+            const trimmed = await window.electronAPI?.continuationSaveTrimmed({
+              videoPath,
+              colorMatchReference: continuationSeedRef.current ?? undefined,
+            })
+            if (trimmed?.path) sourcePath = trimmed.path
+          } catch (err) {
+            logger.error(`Continuation trim/color-match failed; keeping the raw clip: ${err}`)
+          }
+        }
+        const copied = await addVisualAssetToProject(sourcePath, currentProjectId, 'video')
         if (!copied) throw new Error('Could not persist generated video to project storage')
         addAsset(currentProjectId, {
           type: 'video',

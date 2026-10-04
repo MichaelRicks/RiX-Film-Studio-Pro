@@ -35,7 +35,13 @@ from ltx_pipelines.utils.media_io import encode_video, get_videostream_metadata
 from ltx_pipelines.utils.samplers import euler_ancestral_denoising_loop
 
 from api_types import ExtendMode
-from services.ltx_pipeline_common import build_model_paths, offload_mode_for_prefetch_count, resolve_tiling_config
+from services.ltx_pipeline_common import (
+    OUTPUT_VIDEO_CRF,
+    OUTPUT_VIDEO_PRESET,
+    build_model_paths,
+    offload_mode_for_prefetch_count,
+    resolve_tiling_config,
+)
 from services.services_utils import TilingConfigType
 from services.retake_pipeline.retake_pipeline import RetakePipeline
 
@@ -437,6 +443,8 @@ class LTXRetakePipeline:
             audio=audio_out,
             output_path=output_path,
             video_chunks_number=video_chunks,
+            crf=OUTPUT_VIDEO_CRF,
+            preset=OUTPUT_VIDEO_PRESET,
         )
 
     @torch.no_grad()
@@ -487,6 +495,8 @@ class LTXRetakePipeline:
             audio=audio,
             output_path=output_path,
             video_chunks_number=video_chunks,
+            crf=OUTPUT_VIDEO_CRF,
+            preset=OUTPUT_VIDEO_PRESET,
         )
 
     @staticmethod

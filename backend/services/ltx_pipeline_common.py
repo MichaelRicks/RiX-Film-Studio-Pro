@@ -145,6 +145,15 @@ def offload_mode_for_prefetch_count(streaming_prefetch_count: int | None, device
     return OffloadMode.CPU
 
 
+# x264 settings for every generated clip. The library default (crf 19, veryfast) leaves
+# visible macroblock tiling and banding in dark, smooth areas (walls, shadows), in a
+# different pattern on each clip -- so it jumps at every cut between clips, most of all
+# between a clip and its "Continue" follow-up. A lower crf and a slower preset keep those
+# gradients smooth; the cost is a larger file (~2-3x) and a couple of seconds of encode.
+OUTPUT_VIDEO_CRF = 14
+OUTPUT_VIDEO_PRESET = "medium"
+
+
 def encode_video_output(
     video: torch.Tensor | Iterator[torch.Tensor],
     audio: AudioOrNone,
@@ -160,6 +169,8 @@ def encode_video_output(
         audio=audio,
         output_path=output_path,
         video_chunks_number=video_chunks_number_value,
+        crf=OUTPUT_VIDEO_CRF,
+        preset=OUTPUT_VIDEO_PRESET,
     )
 
 
