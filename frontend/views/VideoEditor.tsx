@@ -1,3 +1,4 @@
+import { MIN_ZOOM_FLOOR } from './editor/timeline-zoom'
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react'
 import {
   ChevronRight,
@@ -481,7 +482,7 @@ function VideoEditorWithStore({
     const container = trackContainerRef.current
     if (!container || totalDuration <= 0) return 0.05
     const containerWidth = container.clientWidth - 20
-    return Math.min(0.5, Math.max(0.01, containerWidth / (totalDuration * 100)))
+    return Math.min(0.5, Math.max(MIN_ZOOM_FLOOR, containerWidth / (totalDuration * 100)))
   }, [totalDuration])
   const getMinZoomRef = useRef(getMinZoom)
   getMinZoomRef.current = getMinZoom

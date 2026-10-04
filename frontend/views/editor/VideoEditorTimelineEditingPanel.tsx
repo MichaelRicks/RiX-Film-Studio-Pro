@@ -80,6 +80,8 @@ import {
   selectActiveTool,
 } from './editor-selectors'
 import { useTimelineDrag } from './useTimelineDrag'
+import { TimelineRulerTicks } from './TimelineRulerTicks'
+import { clampZoom, formatZoom, sliderToZoom, stepZoom, zoomToSlider, ZOOM_SLIDER_MAX } from './timeline-zoom'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds'
 import { skipMcpReveal, useMcpReveal } from './mcp-reveal'
@@ -1350,6 +1352,9 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     }
   }, [editingTimecode])
 
+  // Room past the last clip to scroll into and drop onto.
+  const timelineExtent = totalDuration + Math.max(30, totalDuration * 0.25)
+
   const syncTimelineScrollMirrors = useCallback(() => {
     const container = trackContainerRef.current
     if (!container) return
@@ -1395,7 +1400,13 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     if (!container || totalDuration <= 0) return
     const containerWidth = container.clientWidth - 20
     const idealZoom = containerWidth / (totalDuration * 100)
-    setZoom(Math.min(4, Math.max(getMinZoom(), +idealZoom.toFixed(2))))
+    setZoom(clampZoom(idealZoom, getMinZoom()))
+    // The timeline runs past the last clip, so a fit can still be scrolled partway
+    // along; bring it back to the start once the new width has been laid out.
+    requestAnimationFrame(() => {
+      container.scrollLeft = 0
+      if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = 0
+    })
   }, [totalDuration, setZoom, getMinZoom])
 
   useEffect(() => {
@@ -1452,8 +1463,8 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
         centerOnPlayheadRef.current = true
-        const delta = e.deltaY > 0 ? -0.15 : 0.15
-        setZoom((prev: number) => Math.min(4, Math.max(getMinZoom(), +(prev + delta).toFixed(2))))
+        const direction = e.deltaY > 0 ? -1 : 1
+        setZoom((prev: number) => stepZoom(prev, direction, getMinZoom(), 1.15))
       }
     }
 
@@ -1467,11 +1478,11 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
 
   const rulerInterval = useMemo(() => {
     const minLabelSpacing = 80
-    const intervals = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+    const intervals = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
     for (const interval of intervals) {
       if (interval * pixelsPerSecond >= minLabelSpacing) return interval
     }
-    return 600
+    return 3600
   }, [pixelsPerSecond])
 
   const rulerSubInterval = useMemo(() => {
@@ -1480,7 +1491,9 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     if (rulerInterval <= 15) return 5
     if (rulerInterval <= 60) return 10
     if (rulerInterval <= 300) return 60
-    return 60
+    if (rulerInterval <= 900) return 300
+    if (rulerInterval <= 1800) return 600
+    return 900
   }, [rulerInterval])
 
   // --- Extracted timeline subtree from VideoEditor ---
@@ -1896,36 +1909,19 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
               <div ref={rulerScrollRef} className="flex-1 overflow-hidden">
                 <div 
                   ref={timelineRef}
-                  style={{ minWidth: `${totalDuration * pixelsPerSecond}px` }}
+                  style={{ minWidth: `${timelineExtent * pixelsPerSecond}px` }}
                   className={`h-6 bg-zinc-900 border-b border-zinc-800 relative select-none ${
                     'cursor-pointer'
                   }`}
                   onMouseDown={handleRulerMouseDown}
                 >
-                  {(() => {
-                    const ticks: React.ReactNode[] = []
-                    // Render major + minor ticks up to totalDuration
-                    const end = totalDuration + rulerInterval
-                    for (let t = 0; t < end; t = +(t + rulerSubInterval).toFixed(4)) {
-                      const isMajor = Math.abs(t % rulerInterval) < 0.001 || Math.abs(t % rulerInterval - rulerInterval) < 0.001
-                      const leftPx = t * pixelsPerSecond
-                      ticks.push(
-                        <div
-                          key={t}
-                          className="absolute top-0 bottom-0"
-                          style={{ left: `${leftPx}px` }}
-                        >
-                          <div className={`h-full border-l ${isMajor ? 'border-zinc-700' : 'border-zinc-800'}`} />
-                          {isMajor && (
-                            <span className="absolute left-1 bottom-0.5 text-[10px] text-zinc-500 whitespace-nowrap leading-none">
-                              {formatTime(t)}
-                            </span>
-                          )}
-                        </div>
-                      )
-                    }
-                    return ticks
-                  })()}
+                  <TimelineRulerTicks
+                    scrollContainerRef={trackContainerRef}
+                    extent={timelineExtent}
+                    pixelsPerSecond={pixelsPerSecond}
+                    interval={rulerInterval}
+                    subInterval={rulerSubInterval}
+                  />
                   {/* Dimmed region BEFORE In point on ruler */}
                   {inPoint !== null && (
                     <div
@@ -2300,19 +2296,30 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                   style={{ left: `${currentTime * pixelsPerSecond - (trackContainerRef.current?.scrollLeft || 0)}px` }}
                 />
                 {/* Spacer matching the add-track button bar height */}
-                <div className="flex-shrink-0 h-7 border-b border-zinc-700/50" />
+                {/* Also a place to start a drag-select: on a long, full timeline it is
+                    the only empty space that doesn't need scrolling to the end. */}
+                <div
+                  className="flex-shrink-0 h-7 border-b border-zinc-700/50"
+                  onMouseDown={(e) => {
+                    if (e.button !== 0 || activeTool !== 'select') return
+                    e.preventDefault()
+                    startSelectionLasso(e.clientX, e.clientY, e.shiftKey)
+                  }}
+                />
                 <div 
                   ref={trackContainerRef}
                   className="flex-1 overflow-auto select-none"
                   onScroll={handleTimelineScroll}
                 >
                 <div 
-                  style={{ minWidth: `${totalDuration * pixelsPerSecond}px`,
+                  style={{ minWidth: `${timelineExtent * pixelsPerSecond}px`,
                     ...(activeTool === 'blade' ? { cursor: SCISSORS_CURSOR }
                       : activeTool === 'trackForward' ? { cursor: bladeShiftHeld ? TRACK_FWD_ONE_CURSOR : TRACK_FWD_ALL_CURSOR }
                       : {}),
                   }}
-                  className="relative"
+                  // Full height, so the empty space under the last track starts a
+                  // drag-select too (with every track full there is nowhere else).
+                  className="relative min-h-full"
                   onDragOver={(e) => {
                     // Allow asset/timeline drops anywhere on the timeline area, including
                     // images/videos dragged from the Prompt Manager Pro Downloads Browser
@@ -3693,7 +3700,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
           <div className="flex items-center gap-2">
             <Tooltip content="Zoom out (-)" side="top">
               <button
-                onClick={() => { centerOnPlayheadRef.current = true; setZoom(Math.max(getMinZoom(), +(zoom - 0.25).toFixed(2))) }}
+                onClick={() => { centerOnPlayheadRef.current = true; setZoom(stepZoom(zoom, -1, getMinZoom())) }}
                 className="p-0.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 <ZoomOut className="h-3.5 w-3.5" />
@@ -3701,23 +3708,23 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
             </Tooltip>
             <input
               type="range"
-              min={Math.max(1, Math.round(getMinZoom() * 100))}
-              max={400}
-              step={5}
-              value={Math.round(zoom * 100)}
-              onChange={(e) => { centerOnPlayheadRef.current = true; setZoom(Math.max(getMinZoom(), +(parseInt(e.target.value) / 100).toFixed(2))) }}
+              min={0}
+              max={ZOOM_SLIDER_MAX}
+              step={1}
+              value={zoomToSlider(zoom, getMinZoom())}
+              onChange={(e) => { centerOnPlayheadRef.current = true; setZoom(sliderToZoom(parseInt(e.target.value), getMinZoom())) }}
               className="w-28 h-1 accent-blue-500 cursor-pointer"
-              title={`Zoom: ${Math.round(zoom * 100)}%`}
+              title={`Zoom: ${formatZoom(zoom)}`}
             />
             <Tooltip content="Zoom in (+)" side="top">
               <button
-                onClick={() => { centerOnPlayheadRef.current = true; setZoom(Math.min(4, +(zoom + 0.25).toFixed(2))) }}
+                onClick={() => { centerOnPlayheadRef.current = true; setZoom(stepZoom(zoom, 1, getMinZoom())) }}
                 className="p-0.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
               >
                 <ZoomIn className="h-3.5 w-3.5" />
               </button>
             </Tooltip>
-            <span className="text-[10px] text-zinc-500 tabular-nums w-8 text-right">{Math.round(zoom * 100)}%</span>
+            <span className="text-[10px] text-zinc-500 tabular-nums w-9 text-right">{formatZoom(zoom)}</span>
             <Tooltip content="Fit to view (Ctrl+0)" side="top">
               <button
                 onClick={handleFitToView}

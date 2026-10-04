@@ -1,3 +1,4 @@
+import { formatZoom, sliderToZoom, stepZoom, zoomToSlider, ZOOM_SLIDER_MAX } from './timeline-zoom'
 import React from 'react'
 import { Plus, Gauge, Download, Maximize2, Sparkles, FileUp, FileDown, ZoomOut, ZoomIn } from 'lucide-react'
 import { Button } from '../../components/ui/button'
@@ -153,7 +154,7 @@ export function TimelineToolbar({
       <div className="flex items-center gap-2">
         <Tooltip content="Zoom out (-)">
           <button
-            onClick={() => { centerOnPlayheadRef.current = true; setZoom(Math.max(getMinZoom(), +(zoom - 0.25).toFixed(2))) }}
+            onClick={() => { centerOnPlayheadRef.current = true; setZoom(stepZoom(zoom, -1, getMinZoom())) }}
             className="p-0.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
           >
             <ZoomOut className="h-3.5 w-3.5" />
@@ -161,23 +162,23 @@ export function TimelineToolbar({
         </Tooltip>
         <input
           type="range"
-          min={Math.max(1, Math.round(getMinZoom() * 100))}
-          max={400}
-          step={5}
-          value={Math.round(zoom * 100)}
-          onChange={(e) => { centerOnPlayheadRef.current = true; setZoom(Math.max(getMinZoom(), +(parseInt(e.target.value) / 100).toFixed(2))) }}
+          min={0}
+          max={ZOOM_SLIDER_MAX}
+          step={1}
+          value={zoomToSlider(zoom, getMinZoom())}
+          onChange={(e) => { centerOnPlayheadRef.current = true; setZoom(sliderToZoom(parseInt(e.target.value), getMinZoom())) }}
           className="w-28 h-1 accent-blue-500 cursor-pointer"
-          title={`Zoom: ${Math.round(zoom * 100)}%`}
+          title={`Zoom: ${formatZoom(zoom)}`}
         />
         <Tooltip content="Zoom in (+)">
           <button
-            onClick={() => { centerOnPlayheadRef.current = true; setZoom(Math.min(4, +(zoom + 0.25).toFixed(2))) }}
+            onClick={() => { centerOnPlayheadRef.current = true; setZoom(stepZoom(zoom, 1, getMinZoom())) }}
             className="p-0.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
           >
             <ZoomIn className="h-3.5 w-3.5" />
           </button>
         </Tooltip>
-        <span className="text-[10px] text-zinc-500 tabular-nums w-8 text-right">{Math.round(zoom * 100)}%</span>
+        <span className="text-[10px] text-zinc-500 tabular-nums w-9 text-right">{formatZoom(zoom)}</span>
         <Tooltip content="Fit to view (Ctrl+0)">
           <button
             onClick={handleFitToView}

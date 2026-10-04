@@ -1,3 +1,4 @@
+import { MIN_ZOOM_FLOOR } from './timeline-zoom'
 import type { SetStateAction } from 'react'
 import type { ParsedTimeline } from '../../lib/timeline-import'
 import type { SrtCue } from '../../lib/srt'
@@ -2359,7 +2360,7 @@ export function zoomIn(state: EditorState): EditorState {
 }
 
 export function zoomOut(state: EditorState): EditorState {
-  return setZoom(state, Math.max(state.session.tools.zoom / 1.25, 0.1))
+  return setZoom(state, Math.max(state.session.tools.zoom / 1.25, MIN_ZOOM_FLOOR))
 }
 
 export function fitTimelineToView(state: EditorState): EditorState {

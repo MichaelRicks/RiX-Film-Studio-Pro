@@ -1,3 +1,4 @@
+import { stepZoom } from './timeline-zoom'
 import { useEffect, useRef } from 'react'
 import { resolveAction, type ActionId } from '../../lib/keyboard-shortcuts'
 import type { EditorState } from './editor-state'
@@ -307,11 +308,11 @@ export function useEditorKeyboard(params: UseEditorKeyboardParams) {
         // Timeline
         case 'timeline.zoomIn':
           refs.centerOnPlayheadRef.current = true
-          editorActions.setZoom(Math.min(4, +(state.session.tools.zoom + 0.25).toFixed(2)))
+          editorActions.setZoom(stepZoom(state.session.tools.zoom, 1, refs.getMinZoomRef.current()))
           break
         case 'timeline.zoomOut':
           refs.centerOnPlayheadRef.current = true
-          editorActions.setZoom(Math.max(refs.getMinZoomRef.current(), +(state.session.tools.zoom - 0.25).toFixed(2)))
+          editorActions.setZoom(stepZoom(state.session.tools.zoom, -1, refs.getMinZoomRef.current()))
           break
         case 'timeline.fitToView':
           refs.fitToViewRef.current()

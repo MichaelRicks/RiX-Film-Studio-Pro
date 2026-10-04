@@ -381,6 +381,8 @@ function sampleEnvelope(data: Float32Array, a: number, b: number, mode: 'max' | 
   return mode === 'max' ? acc : Math.sqrt(acc / Math.max(1, end - start))
 }
 
+const MAX_WAVEFORM_CANVAS_PX = 4096
+
 export function ClipWaveform({
   url,
   className = '',
@@ -415,7 +417,11 @@ export function ClipWaveform({
     const h = rect.height
     if (w === 0 || h === 0) return
 
-    canvas.width = w * dpr
+    // A long clip is tens of thousands of px wide on the timeline. A canvas that
+    // size is slow to scroll and past ~32k px doesn't draw at all, so the backing
+    // store is capped and CSS stretches it across the clip.
+    const drawW = Math.min(w, MAX_WAVEFORM_CANVAS_PX / dpr)
+    canvas.width = drawW * dpr
     canvas.height = h * dpr
     canvas.style.width = `${w}px`
     canvas.style.height = `${h}px`
@@ -423,7 +429,7 @@ export function ClipWaveform({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, w, h)
+    ctx.clearRect(0, 0, drawW, h)
 
     const centerY = h / 2
     const maxAmp = h * 0.45
@@ -432,7 +438,7 @@ export function ClipWaveform({
     const srcLen = (duration ?? envelope.duration - trimStart) * speed
     const srcStart = trimStart * envelope.rate
     const srcSpan = Math.max(0, srcLen * envelope.rate)
-    const cols = Math.max(1, Math.ceil(w))
+    const cols = Math.max(1, Math.ceil(drawW))
     const peakCol = new Float32Array(cols)
     const rmsCol = new Float32Array(cols)
     for (let x = 0; x < cols; x++) {
@@ -461,7 +467,7 @@ export function ClipWaveform({
     // Hairline centre so silence still reads as "audio here"
     ctx.fillStyle = bodyColor
     ctx.globalAlpha = 0.35
-    ctx.fillRect(0, Math.round(centerY) - 0.5, w, 1)
+    ctx.fillRect(0, Math.round(centerY) - 0.5, drawW, 1)
     ctx.globalAlpha = 1
   }, [envelope, color, bodyColor, trimStart, duration, speed, reversed])
 
