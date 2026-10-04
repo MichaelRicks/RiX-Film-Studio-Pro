@@ -17,6 +17,7 @@ import {
 import { Button } from '../../components/ui/button'
 import { Tooltip } from '../../components/ui/tooltip'
 import { ClipWaveform } from '../../components/AudioWaveform'
+import { useVisibleTimeWindow } from './useVisibleTimeWindow'
 import type { GenerationSettings } from '../../components/SettingsPanel'
 import { useAppSettings } from '../../contexts/AppSettingsContext'
 import { useVideoGenerationModelSpecs } from '../../hooks/use-video-generation-model-specs'
@@ -1204,6 +1205,20 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     splitClipAtPlayhead, setSelectedSubtitleId, setSelectedGap,
     audioTrackHeight, videoTrackHeight, subtitleTrackHeight,
   })
+
+  // Clip virtualization: only clips near the viewport are mounted. Anything being
+  // interacted with (selected, dragged, trimmed, revealed by Claude) stays mounted
+  // wherever it is, so drags and edits never lose their DOM node.
+  const visibleWindow = useVisibleTimeWindow(trackContainerRef, pixelsPerSecond)
+  const visibleClips = useMemo(() => {
+    const pinned = new Set<string>(selectedClipIds)
+    if (draggingClip?.clipId) pinned.add(draggingClip.clipId)
+    if (resizingClip?.clipId) pinned.add(resizingClip.clipId)
+    if (slipSlideClip?.clipId) pinned.add(slipSlideClip.clipId)
+    for (const id of mcpReveal.focus) pinned.add(id)
+    return clips.filter(c =>
+      pinned.has(c.id) || (c.startTime < visibleWindow.to && c.startTime + c.duration > visibleWindow.from))
+  }, [clips, selectedClipIds, draggingClip, resizingClip, slipSlideClip, mcpReveal.focus, visibleWindow])
 
   const startSelectionLasso = useCallback((clientX: number, clientY: number, shiftKey: boolean) => {
     setSelectedSubtitleId(null)
@@ -2525,7 +2540,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                     )
                   })()}
                   
-                  {clips.map(clip => {
+                  {visibleClips.map(clip => {
                     const liveAsset = clip.assetId ? assets.find(a => a.id === clip.assetId) : null
                     const clipColor = getColorLabel(clip.colorLabel || liveAsset?.colorLabel || clip.asset?.colorLabel)
                     const clipWidthPx = clip.duration * pixelsPerSecond
