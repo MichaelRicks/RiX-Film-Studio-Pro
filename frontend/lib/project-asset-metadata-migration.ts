@@ -39,8 +39,15 @@ export type VisualAssetMetadataMigrationEvent =
       updates: VisualAssetMetadataMigrationUpdate[]
     }
 
+const AUDIO_EXT = /\.(mp3|wav|ogg|aac|flac|m4a)$/i
+
+/** An audio file an older drop path registered as an image: thumbnails can never succeed, so it re-triggers migration forever. */
+function isMistypedAudioAsset(asset: Asset): boolean {
+  return (asset.type === 'image' || asset.type === 'video') && AUDIO_EXT.test(asset.path ?? '')
+}
+
 function isVisualAsset(asset: Asset): asset is Asset & { type: 'video' | 'image' } {
-  return asset.type === 'video' || asset.type === 'image'
+  return (asset.type === 'video' || asset.type === 'image') && !isMistypedAudioAsset(asset)
 }
 
 function isMissingThumbnailPair(item: { bigThumbnailPath?: string; smallThumbnailPath?: string }): boolean {
@@ -144,6 +151,7 @@ function buildVisualAssetMetadataMigrationPatch(
 
 export function hasVisualAssetMetadataForMigration(assets: Asset[]): boolean {
   return assets.some(asset => {
+    if (isMistypedAudioAsset(asset)) return true
     if (!isVisualAsset(asset)) return false
     if (isMissingThumbnailPair(asset) || isMissingDimensions(asset)) return true
     return (asset.takes ?? []).some(take => isMissingThumbnailPair(take) || isMissingDimensions(take))
@@ -155,13 +163,16 @@ export async function* runVisualAssetMetadataMigration(
   electronAPI: Pick<ElectronAPI, 'makeThumbnailsForProjectAsset' | 'makeDimensionsForProjectAsset'>,
 ): AsyncGenerator<VisualAssetMetadataMigrationEvent> {
   const jobs = collectVisualAssetMetadataMigrationJobs(assets)
+  const audioFixes: VisualAssetMetadataMigrationUpdate[] = assets
+    .filter(isMistypedAudioAsset)
+    .map(asset => ({ assetId: asset.id, updates: { type: 'audio' } as Partial<Asset> }))
 
   if (jobs.length === 0) {
     yield {
       kind: 'complete',
       total: 0,
       completed: 0,
-      updates: [],
+      updates: audioFixes,
     }
     return
   }
@@ -220,7 +231,7 @@ export async function* runVisualAssetMetadataMigration(
     }
   }
 
-  const updates: VisualAssetMetadataMigrationUpdate[] = []
+  const updates: VisualAssetMetadataMigrationUpdate[] = [...audioFixes]
   for (const asset of assets) {
     const assetUpdates = buildVisualAssetMetadataMigrationPatch(asset, migrationResults)
     if (assetUpdates) {

@@ -8,19 +8,38 @@
 import type { Asset } from '../../types/project-model'
 import { GPM_IMAGE_DND_TYPE, saveDataUrlToTempFile, type GpmDndImage } from '../../components/gpm/gpm-image-file'
 import { FILE_DND, type LibFile } from '../../components/gpm/DownloadsBrowser'
-import { addVisualAssetToProject } from '../../lib/asset-copy'
+import { addGenericAssetToProject, addVisualAssetToProject } from '../../lib/asset-copy'
 import { pathToFileUrl } from '../../lib/file-url'
 
-function getMediaDuration(url: string): Promise<number> {
+function getMediaDuration(url: string, isAudio = false): Promise<number> {
   return new Promise((resolve) => {
-    const v = document.createElement('video')
+    const v = document.createElement(isAudio ? 'audio' : 'video')
     v.src = url
     v.onloadedmetadata = () => resolve(v.duration)
     v.onerror = () => resolve(5)
   })
 }
 
-export async function buildAssetFromPath(path: string, isVideo: boolean, currentProjectId: string | null, name: string): Promise<Asset> {
+export async function buildAssetFromPath(path: string, isVideo: boolean, currentProjectId: string | null, name: string, isAudio = false): Promise<Asset> {
+  if (isAudio) {
+    // Audio has no thumbnails/dimensions; registering it as an image makes the
+    // metadata migration fail on it forever (the "flashing" lock-up).
+    let persistentPath = path
+    const duration = await getMediaDuration(pathToFileUrl(path), true)
+    if (currentProjectId) {
+      const copied = await addGenericAssetToProject(path, currentProjectId)
+      if (copied?.path) persistentPath = copied.path
+    }
+    return {
+      id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      type: 'audio',
+      path: persistentPath,
+      prompt: `Imported: ${name}`,
+      resolution: 'imported',
+      duration,
+      createdAt: Date.now(),
+    }
+  }
   let persistentPath = path
   let bigThumbnailPath: string | undefined
   let smallThumbnailPath: string | undefined
@@ -86,7 +105,7 @@ export function readDroppedMediaAsset(e: React.DragEvent, currentProjectId: stri
   const dlData = e.dataTransfer.getData(FILE_DND)
   if (dlData) {
     const f = JSON.parse(dlData) as LibFile
-    return buildAssetFromPath(f.path, f.isVideo, currentProjectId, f.name)
+    return buildAssetFromPath(f.path, f.isVideo, currentProjectId, f.name, f.isAudio)
   }
   const gpmData = e.dataTransfer.getData(GPM_IMAGE_DND_TYPE)
   if (gpmData) {
