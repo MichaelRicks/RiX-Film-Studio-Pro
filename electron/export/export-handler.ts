@@ -150,9 +150,13 @@ export async function exportTimelineNative(
   // Forward-only: a long export is many ffmpeg runs, each reporting its own position, and the
   // bar used to follow them up and down. It now only ever moves ahead.
   let lastPercent = 0
-  const emitProgress = (percent: number, stage: string) => {
+  const emitProgress = (percent: number, stage: string, renderedSec?: number) => {
     lastPercent = Math.max(lastPercent, Math.max(0, Math.min(100, Math.round(percent))))
-    getMainWindow()?.webContents.send('export-progress', { percent: lastPercent, stage })
+    getMainWindow()?.webContents.send('export-progress', {
+      percent: lastPercent,
+      stage,
+      ...(renderedSec !== undefined ? { renderedSec: Math.min(totalDur, Math.max(0, renderedSec)), totalSec: totalDur } : {}),
+    })
   }
   // The video encode (step 1) is by far the longest, so it owns most of the
   // bar; audio + mux share the tail. (An h264 mux is a stream copy and flies.)
@@ -201,7 +205,7 @@ export async function exportTimelineNative(
       if (segments.length <= SEGMENTS_PER_PASS) {
         const { inputs, filterScript } = buildVideoFilterGraph(segments, graphOpts)
         const r = await runGraph(inputs, filterScript, tmpVideo, finalEncode, (t) => {
-          emitProgress((totalDur > 0 ? t / totalDur : 0) * VIDEO_SHARE, 'Encoding video')
+          emitProgress((totalDur > 0 ? t / totalDur : 0) * VIDEO_SHARE, 'Encoding video', t)
         })
         if (!r.success) { cleanup(); return { success: false, error: r.error } }
       } else {
@@ -232,7 +236,7 @@ export async function exportTimelineNative(
           doneFrames += frameCount
           const r = await runGraph(g.inputs, g.filterScript, piece, pieceEncode, (t) => {
             const frac = totalDur > 0 ? (doneDur + Math.min(t, passDur)) / totalDur : 0
-            emitProgress(frac * VIDEO_SHARE * segmentShare, `Encoding video (part ${pi + 1}/${passes.length})`)
+            emitProgress(frac * VIDEO_SHARE * segmentShare, `Encoding video (part ${pi + 1}/${passes.length})`, doneDur + Math.min(t, passDur))
           })
           if (!r.success) { cleanup(); return { success: false, error: r.error } }
           pieces.push({ file: piece, frames: frameCount })

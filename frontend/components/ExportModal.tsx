@@ -137,6 +137,16 @@ ${laneXml.join('\n')}
 </fcpxml>`
 }
 
+/** 83 -> "1:23", 3725 -> "1:02:05": a running clock for elapsed / remaining / program time. */
+function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const two = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${two(m)}:${two(sec)}` : `${m}:${two(sec)}`
+}
+
 function escapeXml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -183,6 +193,17 @@ export function ExportModal({ projectName }: ExportModalProps) {
   const [exportError, setExportError] = useState<string | null>(null)
   const [exportPath, setExportPath] = useState<string | null>(null)
   const [exportFrameInfo, setExportFrameInfo] = useState('')
+  // Timing: when the render started, a ticking clock for the live readout, the video position
+  // it has reached, and how long the finished export took.
+  const exportStartRef = useRef(0)
+  const [now, setNow] = useState(() => Date.now())
+  const [renderedInfo, setRenderedInfo] = useState<{ renderedSec: number; totalSec: number } | null>(null)
+  const [exportTookMs, setExportTookMs] = useState<number | null>(null)
+  useEffect(() => {
+    if (exportStatus !== 'exporting') return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [exportStatus])
   const abortRef = useRef(false)
 
   // Export settings
@@ -284,6 +305,10 @@ export function ExportModal({ projectName }: ExportModalProps) {
     setExportProgress(0)
     setExportError(null)
     setExportFrameInfo('Preparing...')
+    setRenderedInfo(null)
+    setExportTookMs(null)
+    exportStartRef.current = Date.now()
+    setNow(Date.now())
     abortRef.current = false
 
     let unsubscribe: (() => void) | undefined
@@ -308,10 +333,11 @@ export function ExportModal({ projectName }: ExportModalProps) {
       setExportFrameInfo('Starting ffmpeg...')
 
       // Live progress pushed from the main process as ffmpeg encodes.
-      unsubscribe = window.electronAPI?.onExportProgress?.(({ percent, stage }) => {
+      unsubscribe = window.electronAPI?.onExportProgress?.(({ percent, stage, renderedSec, totalSec }) => {
         if (abortRef.current) return
         setExportProgress(percent)
         if (stage) setExportFrameInfo(stage)
+        setRenderedInfo(renderedSec !== undefined && totalSec !== undefined ? { renderedSec, totalSec } : null)
       })
 
       const result = await window.electronAPI?.exportNative({
@@ -333,6 +359,7 @@ export function ExportModal({ projectName }: ExportModalProps) {
       setExportProgress(100)
       setExportPath(filePath)
       setExportFrameInfo('Export complete')
+      setExportTookMs(Date.now() - exportStartRef.current)
       setExportStatus('done')
       // Open Explorer with the new file already selected (like Post to X), so it's
       // ready to drag into an upload without hunting through the folder.
@@ -388,6 +415,21 @@ export function ExportModal({ projectName }: ExportModalProps) {
                 <p className="text-xs text-zinc-500">{exportProgress}% complete</p>
                 {exportFrameInfo && <p className="text-xs text-zinc-500">{exportFrameInfo}</p>}
               </div>
+              {exportType === 'video' && (() => {
+                const elapsedSec = Math.max(0, (now - exportStartRef.current) / 1000)
+                // Linear estimate from the bar: rough (the stages aren't equal work) but it
+                // settles quickly. Held back until there's enough progress to mean something.
+                const leftSec = exportProgress >= 3 && exportProgress < 100 ? elapsedSec * (100 - exportProgress) / exportProgress : null
+                return (
+                  <div className="space-y-0.5 text-xs text-zinc-500 tabular-nums">
+                    <p>
+                      Elapsed {formatClock(elapsedSec)}
+                      {leftSec !== null && <span> · about {formatClock(leftSec)} left</span>}
+                    </p>
+                    {renderedInfo && <p>Rendered {formatClock(renderedInfo.renderedSec)} of {formatClock(renderedInfo.totalSec)}</p>}
+                  </div>
+                )
+              })()}
               {exportType === 'video' && (
                 <Button
                   variant="outline"
@@ -411,6 +453,7 @@ export function ExportModal({ projectName }: ExportModalProps) {
                 <div>
                   <p className="text-sm text-white font-medium">Export complete</p>
                   <p className="text-xs text-zinc-500 truncate max-w-[340px]">{exportPath}</p>
+                  {exportTookMs !== null && <p className="text-xs text-zinc-400">Finished in {formatClock(exportTookMs / 1000)}</p>}
                   {exportFrameInfo && <p className="text-xs text-zinc-500">{exportFrameInfo}</p>}
                 </div>
               </div>

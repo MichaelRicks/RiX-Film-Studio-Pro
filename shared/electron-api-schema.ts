@@ -633,6 +633,9 @@ export interface ExportProgress {
   percent: number
   /** Human-readable current stage, e.g. "Encoding video", "Finalizing". */
   stage: string
+  /** While the video is being rendered: how far into the program it is, and the program's length (seconds). */
+  renderedSec?: number
+  totalSec?: number
 }
 
 /** An editor tool call forwarded from the RiX MCP server; answered via mcpEditorResponse. */
