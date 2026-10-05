@@ -147,11 +147,12 @@ export async function exportTimelineNative(
   // Total program duration drives the progress percentage: ffmpeg reports the
   // encoded position (`time=`), which we divide by this to get a fraction.
   const totalDur = computeFinalVideoDuration(segments)
+  // Forward-only: a long export is many ffmpeg runs, each reporting its own position, and the
+  // bar used to follow them up and down. It now only ever moves ahead.
+  let lastPercent = 0
   const emitProgress = (percent: number, stage: string) => {
-    getMainWindow()?.webContents.send('export-progress', {
-      percent: Math.max(0, Math.min(100, Math.round(percent))),
-      stage,
-    })
+    lastPercent = Math.max(lastPercent, Math.max(0, Math.min(100, Math.round(percent))))
+    getMainWindow()?.webContents.send('export-progress', { percent: lastPercent, stage })
   }
   // The video encode (step 1) is by far the longest, so it owns most of the
   // bar; audio + mux share the tail. (An h264 mux is a stream copy and flies.)
