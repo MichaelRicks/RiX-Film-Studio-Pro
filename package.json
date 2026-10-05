@@ -1,7 +1,7 @@
 {
   "name": "rix-film-studio-pro",
   "productName": "RiX Film Studio Pro",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "RiX Film Studio Pro — AI video studio built on LTX-2",
   "type": "module",
   "main": "dist-electron/main.js",
