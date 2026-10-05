@@ -75,6 +75,9 @@ export function runFfmpeg(
     logger.info( `[ffmpeg] spawn: ${args.join(' ').slice(0, 400)}`)
     const proc = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
     activeExportProcess = proc
+    // An export can pin every core for half an hour; run below normal priority so the rest of
+    // the machine (and the app's own window) stays responsive. Costs little when it's idle.
+    try { if (proc.pid) os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch { /* not permitted: run at normal */ }
     let stderrLog = ''
     proc.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString()

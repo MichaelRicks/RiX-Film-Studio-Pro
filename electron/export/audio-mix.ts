@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { logger } from '../logger'
 import { fileHasAudio } from './ffmpeg-utils'
 import type { ExportClip } from './timeline'
@@ -40,6 +41,7 @@ function extractPcmToFile(
       'pipe:1',
     ]
     const proc = spawn(ffmpegPath, args, { stdio: ['pipe', 'pipe', 'pipe'] })
+    try { if (proc.pid) os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL) } catch { /* run at normal */ }
     const out = fs.createWriteStream(outFile)
     let bytes = 0
     let exitCode: number | null = null
