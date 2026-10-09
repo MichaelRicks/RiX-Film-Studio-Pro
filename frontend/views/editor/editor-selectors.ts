@@ -347,7 +347,11 @@ export function selectContentEnd(state: EditorState): number {
 }
 
 export function selectTotalDuration(state: EditorState): number {
-  return Math.max(selectContentEnd(state), 30)
+  return Math.max(selectContentEnd(state), selectActiveTimeline(state)?.length ?? 0, 30)
+}
+
+export function selectTimelineLength(state: EditorState): number | undefined {
+  return selectActiveTimeline(state)?.length
 }
 
 export function selectZoom(state: EditorState): number {

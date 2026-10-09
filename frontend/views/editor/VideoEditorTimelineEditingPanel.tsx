@@ -12,7 +12,7 @@ import {
   X, MessageSquare, FileUp, FileDown,
   Sparkles, Type,
   Music, RefreshCw, Loader2, Link2,
-  CircleDot, Circle, PanelRight, ArrowLeftRight, Diamond,
+  CircleDot, Circle, PanelRight, ArrowLeftRight, Diamond, Crosshair,
 } from 'lucide-react'
 import { Button } from '../../components/ui/button'
 import { Tooltip } from '../../components/ui/tooltip'
@@ -73,6 +73,7 @@ import {
   selectSnapEnabled,
   selectSubtitleTrackStyleIdx,
   selectSubtitles,
+  selectTimelineLength,
   selectTimelineRenameState,
   selectTimelines,
   selectTotalDuration,
@@ -82,6 +83,7 @@ import {
 } from './editor-selectors'
 import { useTimelineDrag } from './useTimelineDrag'
 import { TimelineRulerTicks } from './TimelineRulerTicks'
+import { TimelineScrollbar } from './TimelineScrollbar'
 import { clampZoom, formatZoom, sliderToZoom, stepZoom, zoomToSlider, ZOOM_SLIDER_MAX } from './timeline-zoom'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds'
@@ -96,6 +98,15 @@ const TRACK_FWD_ALL_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='24' he
 const TRACK_FWD_ALL_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(TRACK_FWD_ALL_SVG)}") 12 12, e-resize`
 const TRACK_FWD_ONE_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M8 6l6 6-6 6'/></svg>`
 const TRACK_FWD_ONE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(TRACK_FWD_ONE_SVG)}") 12 12, e-resize`
+
+/** mm:ss, with minutes allowed past 59 (a 30-minute timeline reads 30:00). */
+function formatLength(seconds: number): string {
+  const total = Math.round(seconds)
+  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`
+}
+
+// Below this width (px) a clip is drawn as a plain block.
+const NARROW_CLIP_PX = 28
 
 type TimelineMenuState = { timelineId: string; x: number; y: number } | null
 type GapSelection = { trackIndex: number; startTime: number; endTime: number } | null
@@ -221,6 +232,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   const tracks = useEditorStore(selectTracks)
   const subtitles = useEditorStore(selectSubtitles)
   const totalDuration = useEditorStore(selectTotalDuration)
+  const timelineLength = useEditorStore(selectTimelineLength)
   const pixelsPerSecond = useEditorStore(selectPixelsPerSecond)
   const currentTime = useEditorStore(selectCurrentTime)
   const isPlaying = useEditorStore(selectIsPlaying)
@@ -639,6 +651,66 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
       return clip
     }))
   }, [clips, setClips, removeCrossDissolve])
+
+  // The seam fade last placed or sized, so it can be stamped onto other cuts
+  // without redoing it by hand. `audio` seams are crossfades, the rest are video
+  // transitions.
+  const [lastSeam, setLastSeam] = useState<{ audio: boolean; type: TransitionType; duration: number } | null>(null)
+
+  // Put one fade spec on a set of seams. A clip can be the left side of one seam
+  // and the right side of the next, so the changes are merged per clip first.
+  const applySeamSpec = useCallback((
+    targets: { leftClip: TimelineClip; rightClip: TimelineClip }[],
+    spec: { audio: boolean; type: TransitionType; duration: number },
+  ) => {
+    if (targets.length === 0) return
+    const patches = new Map<string, Partial<TimelineClip>>()
+    for (const t of targets) {
+      const dur = +Math.max(0.1, Math.min(spec.duration, Math.min(t.leftClip.duration, t.rightClip.duration) / 2)).toFixed(2)
+      if (spec.audio) {
+        patches.set(t.leftClip.id, { ...patches.get(t.leftClip.id), audioFadeOut: dur })
+        patches.set(t.rightClip.id, { ...patches.get(t.rightClip.id), audioFadeIn: dur })
+      } else {
+        patches.set(t.leftClip.id, { ...patches.get(t.leftClip.id), transitionOut: { type: spec.type, duration: dur } })
+        patches.set(t.rightClip.id, { ...patches.get(t.rightClip.id), transitionIn: { type: spec.type, duration: dur } })
+      }
+    }
+    setClips(prev => prev.map(c => (patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c)))
+  }, [setClips])
+
+  // Copy a clip's fades onto every later clip on the same track: fade in/out on
+  // audio, and the in/out transitions (dissolve, fade from/to black) on picture.
+  // A video clip's linked audio is carried along on its own track.
+  const copyFadesForward = useCallback((clipId: string) => {
+    const source = clips.find(c => c.id === clipId)
+    if (!source) return
+    const sources = [source, ...(source.linkedClipIds ?? []).map(id => clips.find(c => c.id === id)).filter((c): c is TimelineClip => !!c)]
+    const patches = new Map<string, Partial<TimelineClip>>()
+    for (const src of sources) {
+      const patch: Partial<TimelineClip> = {}
+      if (src.type === 'audio') {
+        if ((src.audioFadeIn ?? 0) > 0) patch.audioFadeIn = src.audioFadeIn
+        if ((src.audioFadeOut ?? 0) > 0) patch.audioFadeOut = src.audioFadeOut
+      } else {
+        if (src.transitionIn && src.transitionIn.type !== 'none') patch.transitionIn = src.transitionIn
+        if (src.transitionOut && src.transitionOut.type !== 'none') patch.transitionOut = src.transitionOut
+      }
+      if (Object.keys(patch).length === 0) continue
+      for (const c of clips) {
+        if (c.id === src.id || c.trackIndex !== src.trackIndex || c.startTime <= src.startTime) continue
+        if ((c.type === 'audio') !== (src.type === 'audio')) continue
+        const half = c.duration / 2
+        const next: Partial<TimelineClip> = { ...patch }
+        if (next.audioFadeIn !== undefined) next.audioFadeIn = +Math.min(next.audioFadeIn, half).toFixed(2)
+        if (next.audioFadeOut !== undefined) next.audioFadeOut = +Math.min(next.audioFadeOut, half).toFixed(2)
+        if (next.transitionIn) next.transitionIn = { ...next.transitionIn, duration: +Math.min(next.transitionIn.duration, half).toFixed(2) }
+        if (next.transitionOut) next.transitionOut = { ...next.transitionOut, duration: +Math.min(next.transitionOut.duration, half).toFixed(2) }
+        patches.set(c.id, { ...patches.get(c.id), ...next })
+      }
+    }
+    if (patches.size === 0) return
+    setClips(prev => prev.map(c => (patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c)))
+  }, [clips, setClips])
 
   const removeClip = useCallback((clipId: string) => {
     const clip = clips.find(candidate => candidate.id === clipId)
@@ -1181,6 +1253,10 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     return points
   }, [clips])
 
+  // Room past the last clip to scroll into and drop onto. The playhead can be
+  // scrubbed anywhere inside it, not just up to the last clip.
+  const timelineExtent = totalDuration + Math.max(30, totalDuration * 0.25)
+
   const {
     draggingClip,
     resizingClip,
@@ -1194,7 +1270,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     lassoOriginRef,
   } = useTimelineDrag({
     activeTool, setActiveTool, lastTrimTool, setLastTrimTool,
-    pixelsPerSecond, totalDuration,
+    pixelsPerSecond, totalDuration: timelineExtent,
     clips, setClips, tracks,
     selectedClipIds, setSelectedClipIds,
     currentTime, setCurrentTime, setIsPlaying,
@@ -1367,9 +1443,6 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     }
   }, [editingTimecode])
 
-  // Room past the last clip to scroll into and drop onto.
-  const timelineExtent = totalDuration + Math.max(30, totalDuration * 0.25)
-
   const syncTimelineScrollMirrors = useCallback(() => {
     const container = trackContainerRef.current
     if (!container) return
@@ -1490,6 +1563,65 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   useEffect(() => {
     fitToViewRef.current = handleFitToView
   }, [fitToViewRef, handleFitToView])
+
+  // Jumps of the playhead (Go to End, next edit, a typed timecode) bring it into
+  // view; without this the playhead moves off-screen when zoomed in. Playback has
+  // its own follow, and a playhead already in view is left alone.
+  useEffect(() => {
+    if (isPlaying) return
+    const container = trackContainerRef.current
+    if (!container) return
+    const x = currentTime * pixelsPerSecond
+    if (x >= container.scrollLeft && x <= container.scrollLeft + container.clientWidth) return
+    container.scrollLeft = Math.max(0, x - container.clientWidth / 2)
+    if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = container.scrollLeft
+    syncPlayheadPosition(currentTime)
+    // Only a change of time should pull the view; zooming recentres on its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTime])
+
+  // Zoom so the selected clips fill the timeline view, then scroll to them.
+  const pendingZoomScrollRef = useRef<number | null>(null)
+  const handleZoomToSelection = useCallback(() => {
+    const container = trackContainerRef.current
+    const picked = clips.filter(c => selectedClipIds.has(c.id))
+    if (!container || picked.length === 0) return
+    const start = Math.min(...picked.map(c => c.startTime))
+    const end = Math.max(...picked.map(c => c.startTime + c.duration))
+    const usableWidth = Math.max(100, container.clientWidth - 40)
+    const nextZoom = clampZoom(usableWidth / (Math.max(end - start, 0.5) * 100), getMinZoom())
+    const scrollTo = Math.max(0, start * 100 * nextZoom - 20)
+    if (Math.abs(nextZoom - zoom) < 1e-4) {
+      container.scrollLeft = scrollTo
+      if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = scrollTo
+      return
+    }
+    pendingZoomScrollRef.current = scrollTo
+    setZoom(nextZoom)
+  }, [clips, selectedClipIds, zoom, setZoom, getMinZoom])
+
+  useEffect(() => {
+    const scrollTo = pendingZoomScrollRef.current
+    if (scrollTo === null) return
+    pendingZoomScrollRef.current = null
+    const container = trackContainerRef.current
+    if (!container) return
+    container.scrollLeft = scrollTo
+    if (rulerScrollRef.current) rulerScrollRef.current.scrollLeft = scrollTo
+    syncPlayheadPosition(isPlaying ? playbackTimeRef.current : currentTime)
+  }, [pixelsPerSecond]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Timeline length: typed as a timecode; empty goes back to following the content.
+  const [editingLength, setEditingLength] = useState(false)
+  const [lengthInput, setLengthInput] = useState('')
+  const commitLength = useCallback(() => {
+    setEditingLength(false)
+    const text = lengthInput.trim()
+    if (text === '') { actions.setTimelineLength(null); return }
+    // A bare number is minutes ("30" = half an hour); anything with colons is mm:ss or hh:mm:ss.
+    const seconds = /^\d+(\.\d+)?$/.test(text) ? parseFloat(text) * 60 : parseTime(text)
+    if (seconds !== null && seconds > 0) actions.setTimelineLength(seconds)
+  }, [actions, lengthInput])
 
   const rulerInterval = useMemo(() => {
     const minLabelSpacing = 80
@@ -1899,7 +2031,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                       if (e.key === 'Enter') {
                         const t = parseTime(timecodeInput)
                         if (t !== null) {
-                          const clamped = Math.max(0, Math.min(totalDuration, t))
+                          const clamped = Math.max(0, Math.min(timelineExtent, t))
                           setCurrentTime(clamped)
                           playbackTimeRef.current = clamped
                         }
@@ -2323,7 +2455,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                 />
                 <div 
                   ref={trackContainerRef}
-                  className="flex-1 overflow-auto select-none"
+                  className="flex-1 overflow-auto select-none tl-scroll"
                   onScroll={handleTimelineScroll}
                 >
                 <div 
@@ -2753,7 +2885,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                       </div>
 
                       {/* Audio fade in/out — draggable handles + fade-wedge shading on the waveform */}
-                      {isAudioClip && (
+                      {isAudioClip && clipWidthPx >= NARROW_CLIP_PX && (
                         <div className="absolute inset-0 z-20 pointer-events-none">
                           {fadeInPx > 1 && (
                             <div className="absolute top-0 bottom-0 left-0 bg-black/45" style={{ width: fadeInPx, clipPath: 'polygon(0 0, 100% 0, 0 100%)' }} />
@@ -2900,6 +3032,10 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                         </div>
                       )}
 
+                      {/* A clip only a few px wide (a whole long timeline in view) has no room
+                          for a thumbnail, label or waveform; leaving them out is what keeps the
+                          full-length view quick to open. */}
+                      {clipWidthPx >= NARROW_CLIP_PX && (
                       <div className="h-full flex items-center pl-5 pr-2 gap-2">
                         {clip.type === 'adjustment' ? (
                           <div className="h-8 w-8 flex-shrink-0 rounded bg-blue-800/30 border border-blue-600/30 flex items-center justify-center">
@@ -3032,6 +3168,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           )
                         })()}
                       </div>
+                      )}
                       
                       {/* Regenerating overlay on the clip */}
                       {clip.isRegenerating && (
@@ -3365,8 +3502,13 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                     const topPx = trackTopPx(cp.trackIndex, 4)
                     const isHovered = hoveredCutPoint?.leftClipId === cp.leftClip.id && hoveredCutPoint?.rightClipId === cp.rightClip.id
                     const isDragOver = dragOverCut?.leftClipId === cp.leftClip.id && dragOverCut?.rightClipId === cp.rightClip.id
-                    const dissolveDur = cp.hasTransition ? (cp.leftClip.transitionOut?.duration || DEFAULT_DISSOLVE_DURATION) : 0
+                    const dissolveDur = cp.hasTransition
+                      ? (cp.isAudio ? (cp.leftClip.audioFadeOut || DEFAULT_DISSOLVE_DURATION) : (cp.leftClip.transitionOut?.duration || DEFAULT_DISSOLVE_DURATION))
+                      : 0
                     const dissolveWidthPx = dissolveDur * pixelsPerSecond
+                    // Half the seam zone: the fade runs this far each side of the cut.
+                    const halfPx = cp.hasTransition ? Math.max(12, dissolveWidthPx) : 12
+                    const laterSeams = cutPoints.filter(o => o.isAudio === cp.isAudio && o.trackIndex === cp.trackIndex && o.time > cp.time + CUT_POINT_TOLERANCE)
                     // Color-code + label the seam region by transition type.
                     const tRGB =
                       cp.transitionType === 'dissolve' ? '139,92,246'      // purple
@@ -3388,9 +3530,9 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                         key={`cut-${cp.leftClip.id}-${cp.rightClip.id}`}
                         className="absolute z-20"
                         style={{
-                          left: `${!cp.isAudio && cp.hasTransition ? leftPx - dissolveWidthPx : leftPx - 12}px`,
+                          left: `${leftPx - halfPx}px`,
                           top: `${topPx - 24}px`,
-                          width: `${!cp.isAudio && cp.hasTransition ? dissolveWidthPx * 2 : 24}px`,
+                          width: `${halfPx * 2}px`,
                           height: `${48 + 24}px`, /* extend upward to include popup zone */
                         }}
                         onMouseEnter={() => setHoveredCutPoint({
@@ -3417,6 +3559,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           e.preventDefault()
                           e.stopPropagation()
                           applyJunctionTransition(cp.leftClip.id, cp.rightClip.id, type)
+                          setLastSeam({ audio: cp.isAudio, type: cp.isAudio ? 'dissolve' : type, duration: dissolveDur || DEFAULT_DISSOLVE_DURATION })
                         }}
                       >
                         {/* Visible indicator line — also the drop indicator: a faint
@@ -3425,204 +3568,156 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           className={`absolute top-6 bottom-0 rounded-full transition-all ${isDragOver ? 'w-1.5 shadow-[0_0_8px_rgba(96,165,250,0.9)]' : 'w-0.5'} ${
                             isDragOver || isHovered ? 'bg-blue-400' : cp.hasTransition ? (cp.isAudio ? 'bg-emerald-400/70' : 'bg-blue-500/60') : 'bg-zinc-500/25'
                           }`}
-                          style={{ left: `${!cp.isAudio && cp.hasTransition ? dissolveWidthPx : 12}px`, transform: 'translateX(-50%)' }}
+                          style={{ left: `${halfPx}px`, transform: 'translateX(-50%)' }}
                         />
                         
-                        {cp.isAudio ? (
+                        {cp.hasTransition && (
                           <>
-                            {/* Audio cross-dissolve marker + quick add/remove. The
-                                fade lengths are sized with the clips' own waveform
-                                fade handles, so the seam UI stays compact. */}
-                            {cp.hasTransition && (
-                              <div
-                                className="absolute flex items-center justify-center cursor-ew-resize z-30 group/xf"
-                                style={{ left: '12px', top: '24px', transform: 'translateX(-50%)', height: '48px', width: '30px' }}
-                                title="Drag to lengthen or shorten the crossfade"
-                                onMouseDown={(e) => {
-                                  e.stopPropagation(); e.preventDefault()
-                                  const startX = e.clientX
-                                  const startDur = cp.leftClip.audioFadeOut ?? 0
-                                  const maxDur = Math.min(cp.leftClip.duration, cp.rightClip.duration) / 2
-                                  const onMove = (ev: MouseEvent) => {
-                                    const next = Math.max(0.1, Math.min(maxDur, startDur + (ev.clientX - startX) / pixelsPerSecond))
-                                    setClips(prev => prev.map(c => {
-                                      if (c.id === cp.leftClip.id) return { ...c, audioFadeOut: +next.toFixed(2) }
-                                      if (c.id === cp.rightClip.id) return { ...c, audioFadeIn: +next.toFixed(2) }
-                                      return c
-                                    }))
-                                  }
-                                  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.body.style.cursor = '' }
-                                  document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); document.body.style.cursor = 'ew-resize'
-                                }}
-                              >
-                                <span className="text-[9px] text-emerald-200/90 font-medium bg-black/60 px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-0.5 pointer-events-none group-hover/xf:bg-emerald-900/80 group-hover/xf:text-emerald-100 transition-colors">
-                                  <ArrowLeftRight className="h-2.5 w-2.5" />
-                                  {(cp.leftClip.audioFadeOut ?? 0).toFixed(1)}s
-                                </span>
-                              </div>
-                            )}
-                            {isHovered && (
-                              <div
-                                className="absolute left-1/2 -translate-x-1/2 top-0 whitespace-nowrap z-40"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {cp.hasTransition ? (
-                                  <button
-                                    className="px-2 py-0.5 rounded bg-red-900/80 border border-red-700 text-[9px] text-red-300 hover:bg-red-800 transition-colors shadow-lg"
-                                    onClick={() => removeCrossDissolve(cp.leftClip.id, cp.rightClip.id)}
-                                  >
-                                    Remove
-                                  </button>
-                                ) : (
-                                  <button
-                                    className="px-2 py-1 rounded-lg bg-emerald-600/90 border border-emerald-500 text-[10px] text-white hover:bg-emerald-500 transition-colors shadow-lg flex items-center gap-1"
-                                    onClick={() => addCrossDissolve(cp.leftClip.id, cp.rightClip.id)}
-                                  >
-                                    <ArrowLeftRight className="h-3 w-3" />
-                                    Crossfade
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        ) : cp.hasTransition ? (
-                          <>
-                            {/* Transition region visual (gradient bar straddling the seam) */}
+                            {/* Fade zone straddling the seam. Dragging the left edge left or the
+                                right edge right lengthens it (video dissolves and audio crossfades
+                                alike); dragging either toward the cut shortens it. */}
                             <div
                               className="absolute rounded-sm pointer-events-none"
                               style={{
                                 left: 0,
                                 top: '24px',
-                                width: `${dissolveWidthPx * 2}px`,
+                                width: `${halfPx * 2}px`,
                                 height: '48px',
-                                background: `linear-gradient(to right, rgba(${tRGB},0.15), rgba(${tRGB},0.3), rgba(${tRGB},0.15))`,
-                                borderTop: `2px solid rgba(${tRGB},0.5)`,
-                                borderBottom: `2px solid rgba(${tRGB},0.5)`,
+                                background: cp.isAudio
+                                  ? 'linear-gradient(to right, rgba(52,211,153,0.12), rgba(52,211,153,0.28), rgba(52,211,153,0.12))'
+                                  : `linear-gradient(to right, rgba(${tRGB},0.15), rgba(${tRGB},0.3), rgba(${tRGB},0.15))`,
+                                borderTop: `2px solid ${cp.isAudio ? 'rgba(52,211,153,0.5)' : `rgba(${tRGB},0.5)`}`,
+                                borderBottom: `2px solid ${cp.isAudio ? 'rgba(52,211,153,0.5)' : `rgba(${tRGB},0.5)`}`,
                               }}
                             />
-
-                            {/* Transition type + duration label */}
                             <div
                               className="absolute flex items-center justify-center pointer-events-none"
-                              style={{
-                                left: 0,
-                                top: '24px',
-                                width: `${dissolveWidthPx * 2}px`,
-                                height: '48px',
-                              }}
+                              style={{ left: 0, top: '24px', width: `${halfPx * 2}px`, height: '48px' }}
                             >
-                              <span className="text-[9px] text-white/90 font-medium bg-black/55 px-1.5 py-0.5 rounded whitespace-nowrap">
-                                {tLabel} · {dissolveDur.toFixed(1)}s
+                              <span className="text-[9px] text-white/90 font-medium bg-black/55 px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-0.5">
+                                {cp.isAudio ? <ArrowLeftRight className="h-2.5 w-2.5" /> : <>{tLabel} · </>}
+                                {dissolveDur.toFixed(1)}s
                               </span>
                             </div>
-                            
-                            {/* Left drag handle */}
-                            <div
-                              className="absolute top-6 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/40 transition-colors z-30"
-                              style={{ left: 0 }}
-                              onMouseDown={(e) => {
-                                e.stopPropagation()
-                                e.preventDefault()
-                                const startX = e.clientX
-                                const startDur = dissolveDur
-                                
-                                const handleMove = (ev: MouseEvent) => {
-                                  const delta = (startX - ev.clientX) / pixelsPerSecond
-                                  const newDur = Math.max(0.1, Math.min(cp.leftClip.duration * 0.9, startDur + delta))
-                                  setClips(prev => prev.map(c => {
-                                    if (c.id === cp.leftClip.id) return { ...c, transitionOut: { ...c.transitionOut, duration: +newDur.toFixed(2) } }
-                                    if (c.id === cp.rightClip.id) return { ...c, transitionIn: { ...c.transitionIn, duration: +newDur.toFixed(2) } }
-                                    return c
-                                  }))
-                                }
-                                const handleUp = () => {
-                                  document.removeEventListener('mousemove', handleMove)
-                                  document.removeEventListener('mouseup', handleUp)
-                                  document.body.style.cursor = ''
-                                  document.body.style.userSelect = ''
-                                }
-                                document.addEventListener('mousemove', handleMove)
-                                document.addEventListener('mouseup', handleUp)
-                                document.body.style.cursor = 'ew-resize'
-                                document.body.style.userSelect = 'none'
-                              }}
-                            >
-                              <div className="absolute inset-y-0 left-0 w-0.5 bg-blue-400 rounded-full" />
-                            </div>
-                            
-                            {/* Right drag handle */}
-                            <div
-                              className="absolute top-6 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/40 transition-colors z-30"
-                              style={{ right: 0 }}
-                              onMouseDown={(e) => {
-                                e.stopPropagation()
-                                e.preventDefault()
-                                const startX = e.clientX
-                                const startDur = dissolveDur
-                                
-                                const handleMove = (ev: MouseEvent) => {
-                                  const delta = (ev.clientX - startX) / pixelsPerSecond
-                                  const newDur = Math.max(0.1, Math.min(cp.rightClip.duration * 0.9, startDur + delta))
-                                  setClips(prev => prev.map(c => {
-                                    if (c.id === cp.leftClip.id) return { ...c, transitionOut: { ...c.transitionOut, duration: +newDur.toFixed(2) } }
-                                    if (c.id === cp.rightClip.id) return { ...c, transitionIn: { ...c.transitionIn, duration: +newDur.toFixed(2) } }
-                                    return c
-                                  }))
-                                }
-                                const handleUp = () => {
-                                  document.removeEventListener('mousemove', handleMove)
-                                  document.removeEventListener('mouseup', handleUp)
-                                  document.body.style.cursor = ''
-                                  document.body.style.userSelect = ''
-                                }
-                                document.addEventListener('mousemove', handleMove)
-                                document.addEventListener('mouseup', handleUp)
-                                document.body.style.cursor = 'ew-resize'
-                                document.body.style.userSelect = 'none'
-                              }}
-                            >
-                              <div className="absolute inset-y-0 right-0 w-0.5 bg-blue-400 rounded-full" />
-                            </div>
-                            
-                            {/* Remove button (shown on hover, positioned inside the zone) */}
-                            {isHovered && (
+                            {(['left', 'right'] as const).map(side => (
                               <div
-                                className="absolute left-1/2 -translate-x-1/2 top-0 whitespace-nowrap z-40"
-                                onClick={(e) => e.stopPropagation()}
+                                key={side}
+                                className="absolute top-6 bottom-0 w-2 cursor-ew-resize hover:bg-blue-500/40 transition-colors z-30"
+                                style={side === 'left' ? { left: 0 } : { right: 0 }}
+                                title="Drag outward to lengthen, inward to shorten"
+                                onMouseDown={(e) => {
+                                  e.stopPropagation()
+                                  e.preventDefault()
+                                  const startX = e.clientX
+                                  const startDur = dissolveDur
+                                  const maxDur = cp.isAudio
+                                    ? Math.min(cp.leftClip.duration, cp.rightClip.duration) / 2
+                                    : (side === 'left' ? cp.leftClip.duration : cp.rightClip.duration) * 0.9
+                                  let latest = startDur
+                                  const handleMove = (ev: MouseEvent) => {
+                                    // Outward is longer: left edge dragged left, right edge dragged right.
+                                    const delta = (side === 'left' ? startX - ev.clientX : ev.clientX - startX) / pixelsPerSecond
+                                    const newDur = +Math.max(0.1, Math.min(maxDur, startDur + delta)).toFixed(2)
+                                    latest = newDur
+                                    setClips(prev => prev.map(c => {
+                                      if (c.id === cp.leftClip.id) {
+                                        return cp.isAudio ? { ...c, audioFadeOut: newDur } : { ...c, transitionOut: { ...c.transitionOut, duration: newDur } }
+                                      }
+                                      if (c.id === cp.rightClip.id) {
+                                        return cp.isAudio ? { ...c, audioFadeIn: newDur } : { ...c, transitionIn: { ...c.transitionIn, duration: newDur } }
+                                      }
+                                      return c
+                                    }))
+                                  }
+                                  const handleUp = () => {
+                                    document.removeEventListener('mousemove', handleMove)
+                                    document.removeEventListener('mouseup', handleUp)
+                                    document.body.style.cursor = ''
+                                    document.body.style.userSelect = ''
+                                    setLastSeam({ audio: cp.isAudio, type: cp.isAudio ? 'dissolve' : cp.transitionType, duration: latest })
+                                  }
+                                  document.addEventListener('mousemove', handleMove)
+                                  document.addEventListener('mouseup', handleUp)
+                                  document.body.style.cursor = 'ew-resize'
+                                  document.body.style.userSelect = 'none'
+                                }}
                               >
+                                <div className={`absolute inset-y-0 ${side === 'left' ? 'left-0' : 'right-0'} w-0.5 ${cp.isAudio ? 'bg-emerald-300' : 'bg-blue-400'} rounded-full`} />
+                              </div>
+                            ))}
+                          </>
+                        )}
+
+                        {/* Hover actions: add or remove the fade, and copy it to other cuts. */}
+                        {isHovered && (
+                          <div
+                            className="absolute left-1/2 -translate-x-1/2 top-0 whitespace-nowrap z-40 flex items-center gap-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {cp.hasTransition ? (
+                              <>
                                 <button
                                   className="px-2 py-0.5 rounded bg-red-900/80 border border-red-700 text-[9px] text-red-300 hover:bg-red-800 transition-colors shadow-lg"
                                   onClick={() => removeCrossDissolve(cp.leftClip.id, cp.rightClip.id)}
                                 >
                                   Remove
                                 </button>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            {/* Empty seam: add-dissolve button on hover (or drop any transition here) */}
-                            {isHovered && (
-                              <div
-                                className="absolute left-1/2 -translate-x-1/2 top-0 whitespace-nowrap z-40"
-                                onClick={(e) => e.stopPropagation()}
-                              >
+                                {laterSeams.length > 0 && (
+                                  <button
+                                    className="px-2 py-0.5 rounded bg-zinc-800/90 border border-zinc-600 text-[9px] text-zinc-200 hover:bg-zinc-700 transition-colors shadow-lg"
+                                    title={`Copy this ${dissolveDur.toFixed(1)}s fade to the ${laterSeams.length} later cut${laterSeams.length === 1 ? '' : 's'} on this track`}
+                                    onClick={() => {
+                                      const spec = { audio: cp.isAudio, type: cp.isAudio ? 'dissolve' as TransitionType : cp.transitionType, duration: dissolveDur }
+                                      applySeamSpec(laterSeams, spec)
+                                      setLastSeam(spec)
+                                    }}
+                                  >
+                                    All forward ▸ ({laterSeams.length})
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <>
                                 <button
-                                  className="px-2 py-1 rounded-lg bg-blue-600/90 border border-blue-500 text-[10px] text-white hover:bg-blue-500 transition-colors shadow-lg flex items-center gap-1"
-                                  onClick={() => addCrossDissolve(cp.leftClip.id, cp.rightClip.id)}
+                                  className={`px-2 py-1 rounded-lg border text-[10px] text-white transition-colors shadow-lg flex items-center gap-1 ${
+                                    cp.isAudio ? 'bg-emerald-600/90 border-emerald-500 hover:bg-emerald-500' : 'bg-blue-600/90 border-blue-500 hover:bg-blue-500'
+                                  }`}
+                                  onClick={() => {
+                                    addCrossDissolve(cp.leftClip.id, cp.rightClip.id)
+                                    setLastSeam({ audio: cp.isAudio, type: 'dissolve', duration: DEFAULT_DISSOLVE_DURATION })
+                                  }}
                                 >
-                                  <Film className="h-3 w-3" />
-                                  Dissolve
+                                  {cp.isAudio ? <ArrowLeftRight className="h-3 w-3" /> : <Film className="h-3 w-3" />}
+                                  {cp.isAudio ? 'Crossfade' : 'Dissolve'}
                                 </button>
-                              </div>
+                                {lastSeam && lastSeam.audio === cp.isAudio && (
+                                  <>
+                                    <button
+                                      className="px-2 py-1 rounded-lg bg-zinc-800/90 border border-zinc-600 text-[10px] text-zinc-200 hover:bg-zinc-700 transition-colors shadow-lg"
+                                      title="Use the fade you placed last on this cut"
+                                      onClick={() => applySeamSpec([cp], lastSeam)}
+                                    >
+                                      Last: {cp.isAudio ? 'crossfade' : lastSeam.type.replace('fade-to-', 'fade ')} {lastSeam.duration.toFixed(1)}s
+                                    </button>
+                                    <button
+                                      className="px-2 py-1 rounded-lg bg-zinc-800/90 border border-zinc-600 text-[10px] text-zinc-200 hover:bg-zinc-700 transition-colors shadow-lg"
+                                      title="Use the fade you placed last on this cut and every later cut on this track"
+                                      onClick={() => applySeamSpec([cp, ...laterSeams], lastSeam)}
+                                    >
+                                      Last ▸ all forward
+                                    </button>
+                                  </>
+                                )}
+                              </>
                             )}
-                          </>
+                          </div>
                         )}
                       </div>
                     )
                   })}
                 </div>{/* close relative inner */}
               </div>{/* close trackContainerRef */}
+              <TimelineScrollbar containerRef={trackContainerRef} contentWidth={timelineExtent * pixelsPerSecond} />
               </div>{/* close content column */}
             </div>{/* close scrollable area row */}
             </div>{/* close tracks body flex-col */}
@@ -3708,9 +3803,42 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
             </>
           )}
           
+          <div className="w-px h-4 bg-zinc-700" />
+          {/* Timeline length: how far the timeline runs. Bare number = minutes. */}
+          <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+            <span>Length</span>
+            {editingLength ? (
+              <input
+                autoFocus
+                value={lengthInput}
+                onChange={(e) => setLengthInput(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === 'Enter') commitLength()
+                  else if (e.key === 'Escape') setEditingLength(false)
+                }}
+                onBlur={commitLength}
+                placeholder="min or mm:ss"
+                className="w-20 h-6 bg-zinc-950 border border-zinc-700 rounded px-1.5 text-[10px] text-amber-400 font-mono outline-none"
+              />
+            ) : (
+              <Tooltip content="Set how long the timeline runs (e.g. 30 = 30 minutes). Clear to follow the clips." side="top">
+                <button
+                  onClick={() => {
+                    setLengthInput(timelineLength ? formatLength(timelineLength) : '')
+                    setEditingLength(true)
+                  }}
+                  className="h-6 px-1.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-amber-400 hover:border-zinc-500 tabular-nums"
+                >
+                  {timelineLength ? formatLength(timelineLength) : 'Auto'}
+                </button>
+              </Tooltip>
+            )}
+          </div>
+
           {/* Spacer */}
           <div className="flex-1" />
-          
+
           {/* Zoom slider bar */}
           <div className="flex items-center gap-2">
             <Tooltip content="Zoom out (-)" side="top">
@@ -3740,6 +3868,15 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
               </button>
             </Tooltip>
             <span className="text-[10px] text-zinc-500 tabular-nums w-9 text-right">{formatZoom(zoom)}</span>
+            <Tooltip content="Zoom to selected clips (drag-select clips first)" side="top">
+              <button
+                onClick={handleZoomToSelection}
+                disabled={selectedClipIds.size === 0}
+                className="p-0.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors ml-0.5 disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <Crosshair className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
             <Tooltip content="Fit to view (Ctrl+0)" side="top">
               <button
                 onClick={handleFitToView}
@@ -3790,6 +3927,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
           canUseRetake={canUseRetake}
           onCaptureFrameForVideo={onCaptureFrameForVideo}
           onCreateVideoFromAudio={onCreateVideoFromAudio}
+          copyFadesForward={copyFadesForward}
         />
       )}
       {selectedGap && tracks[selectedGap.trackIndex]?.kind !== 'audio' && (

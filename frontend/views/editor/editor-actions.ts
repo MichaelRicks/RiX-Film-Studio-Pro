@@ -2355,6 +2355,14 @@ export function setZoom(state: EditorState, zoom: number): EditorState {
   }))
 }
 
+/** Set how long the active timeline runs, in seconds. `null` goes back to following the content. */
+export function setTimelineLength(state: EditorState, seconds: number | null): EditorState {
+  const length = seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
+  const active = getActiveTimelineFromEditorModel(state.editorModel)
+  if (!active || active.length === length) return state
+  return updateEditorModel(state, model => withActiveTimeline(model, timeline => ({ ...timeline, length })))
+}
+
 export function zoomIn(state: EditorState): EditorState {
   return setZoom(state, Math.min(selectClips(state).length > 0 ? state.session.tools.zoom * 1.25 : 1.25, 10))
 }

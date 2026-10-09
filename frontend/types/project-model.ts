@@ -419,6 +419,8 @@ export const timelineSchema = z.object({
   subtitles: z.array(subtitleClipSchema).default([]),
   inPoint: z.number().nullable().optional(),
   outPoint: z.number().nullable().optional(),
+  // Seconds the user has set the timeline to run to. Never shorter than the content.
+  length: z.number().positive().optional(),
 })
 
 export const assetBinsSchema = z.record(z.string(), z.string())

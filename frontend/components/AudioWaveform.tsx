@@ -42,6 +42,18 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer
 }
 
+// Decoding a long file blocks the main thread for seconds, and a full timeline asks
+// for dozens at once. They run one at a time, and the number crunching yields to
+// the UI between slices, so the editor stays usable while waveforms fill in.
+let decodeChain: Promise<unknown> = Promise.resolve()
+function queueDecode<T>(job: () => Promise<T>): Promise<T> {
+  const run = decodeChain.then(job, job)
+  decodeChain = run.catch(() => {})
+  return run
+}
+const yieldToUi = () => new Promise<void>(resolve => setTimeout(resolve, 0))
+const SLICE_MS = 8
+
 async function decodeEnvelope(url: string): Promise<WaveformEnvelope> {
   let arrayBuffer: ArrayBuffer
 
@@ -65,7 +77,12 @@ async function decodeEnvelope(url: string): Promise<WaveformEnvelope> {
   const peak = new Float32Array(windows)
   const rms = new Float32Array(windows)
 
+  let sliceStart = performance.now()
   for (let i = 0; i < windows; i++) {
+    if ((i & 63) === 0 && performance.now() - sliceStart > SLICE_MS) {
+      await yieldToUi()
+      sliceStart = performance.now()
+    }
     const start = i * samplesPerWindow
     const end = Math.min(start + samplesPerWindow, length)
     let max = 0
@@ -91,7 +108,7 @@ export async function getWaveformEnvelope(url: string): Promise<WaveformEnvelope
   if (cached) return cached
   let pending = pendingEnvelopes.get(url)
   if (!pending) {
-    pending = decodeEnvelope(url)
+    pending = queueDecode(() => decodeEnvelope(url))
       .then(env => { envelopeCache.set(url, env); return env })
       .finally(() => pendingEnvelopes.delete(url))
     pendingEnvelopes.set(url, pending)

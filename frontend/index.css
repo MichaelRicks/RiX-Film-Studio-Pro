@@ -111,3 +111,9 @@ body {
 }
 .mcp-clip-drop { animation: mcp-clip-drop 320ms ease-out; z-index: 25; }
 .mcp-clip-flash { animation: mcp-clip-flash 450ms ease-in-out; z-index: 25; }
+
+/* The timeline draws its own horizontal scrollbar (TimelineScrollbar) so the
+   thumb keeps a usable size when zoomed in on a long timeline. */
+.tl-scroll::-webkit-scrollbar:horizontal {
+  height: 0;
+}

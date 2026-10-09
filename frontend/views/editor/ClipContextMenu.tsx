@@ -52,6 +52,15 @@ export interface ClipContextMenuProps {
   canUseRetake: boolean
   onCaptureFrameForVideo: (clip: TimelineClip) => void
   onCreateVideoFromAudio: (clip: TimelineClip) => void
+  copyFadesForward: (clipId: string) => void
+}
+
+/** True when the clip, or an audio clip linked to it, has a fade or transition to copy forward. */
+function hasFade(clip: TimelineClip, clips: TimelineClip[]): boolean {
+  const own = (c: TimelineClip) =>
+    (c.transitionIn && c.transitionIn.type !== 'none') || (c.transitionOut && c.transitionOut.type !== 'none')
+    || (c.audioFadeIn ?? 0) > 0 || (c.audioFadeOut ?? 0) > 0
+  return Boolean(own(clip) || clip.linkedClipIds?.some(id => { const l = clips.find(c => c.id === id); return l && own(l) }))
 }
 
 // Reusable menu item component
@@ -125,6 +134,7 @@ export function ClipContextMenu({
   canUseRetake,
   onCaptureFrameForVideo,
   onCreateVideoFromAudio,
+  copyFadesForward,
 }: ClipContextMenuProps) {
   const close = () => setClipContextMenu(null)
   const isBackground = clipContextMenu.kind === 'background'
@@ -238,6 +248,7 @@ export function ClipContextMenu({
           canUseRetake={canUseRetake}
           onCaptureFrameForVideo={onCaptureFrameForVideo}
           onCreateVideoFromAudio={onCreateVideoFromAudio}
+          copyFadesForward={copyFadesForward}
           close={close}
         />
       ) : null}
@@ -270,6 +281,7 @@ function SingleClipMenu({
   onCreateVideoFromImage, onRetakeClip, onICLoraClip, canUseIcLora, canUseRetake,
   onCaptureFrameForVideo,
   onCreateVideoFromAudio,
+  copyFadesForward,
   close,
 }: {
   contextClip: TimelineClip
@@ -299,6 +311,7 @@ function SingleClipMenu({
   canUseRetake: boolean
   onCaptureFrameForVideo: (clip: TimelineClip) => void
   onCreateVideoFromAudio: (clip: TimelineClip) => void
+  copyFadesForward: (clipId: string) => void
   close: () => void
 }) {
   const liveAsset = getLiveAsset(contextClip)
@@ -319,6 +332,11 @@ function SingleClipMenu({
       {/* ── 2. Edit ── */}
       <MenuItem icon={Copy} label="Duplicate" onClick={() => { duplicateClip(contextClip.id); close() }} />
       <MenuItem icon={Scissors} label="Split at Playhead" shortcut="B" onClick={() => { splitClipAtPlayhead(contextClip.id); close() }} />
+      {hasFade(contextClip, clips) && (
+        <MenuItem icon={ChevronRight} label="Copy Fades to Clips Forward"
+          title="Copy this clip's fade in / fade out (and dissolve or fade from/to black) onto every later clip on its track"
+          onClick={() => { copyFadesForward(contextClip.id); close() }} />
+      )}
 
       <Divider />
 
