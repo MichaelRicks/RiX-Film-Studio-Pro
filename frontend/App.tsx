@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { backupAllProjects } from './lib/project-backup'
 import { Loader2, AlertCircle, Settings, FileText } from 'lucide-react'
 import { ApiClient, type ApiSuccessOf } from './lib/api-client'
 import { ProjectProvider } from './contexts/ProjectContext'
@@ -130,6 +131,10 @@ function AppContent() {
     return window.electronAPI?.onMenuAction((action) => {
       if (action === 'show-keyboard-shortcuts') {
         setKbEditorOpen(true)
+        return
+      }
+      if (action === 'backup-all-projects') {
+        void backupAllProjects()
         return
       }
       window.dispatchEvent(new CustomEvent('ltx:menu-action', { detail: action }))

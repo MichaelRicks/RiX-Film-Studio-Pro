@@ -340,6 +340,16 @@ export const electronAPISchemas = {
     input: z.object({ projectId: z.string() }),
     output: emptyResult,
   },
+  // Asks for a folder and copies every project's saved record into a dated
+  // subfolder there (project files only, not media). Shows its own result dialog.
+  backupAllProjects: {
+    input: z.object({}),
+    output: z.discriminatedUnion('status', [
+      z.object({ status: z.literal('done'), count: z.number(), folder: z.string() }),
+      z.object({ status: z.literal('cancelled') }),
+      z.object({ status: z.literal('failed'), error: z.string() }),
+    ]),
+  },
 
   // File dialogs & save
   showSaveDialog: {

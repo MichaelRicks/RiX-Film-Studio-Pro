@@ -81,3 +81,18 @@ if (typeof window !== 'undefined') {
     for (const projectId of Array.from(pending.keys())) flush(projectId)
   })
 }
+
+/**
+ * "Back up all projects": make sure an open editor has flushed, let the debounced
+ * disk write land, then ask the main process to copy every project's record to a
+ * folder the user picks. The main process shows the result dialog.
+ */
+export async function backupAllProjects(): Promise<void> {
+  window.dispatchEvent(new Event('ltx:flush-editor'))
+  await new Promise(resolve => setTimeout(resolve, BACKUP_DEBOUNCE_MS + 800))
+  const result = await api()?.backupAllProjects()
+  if (result?.status === 'failed') {
+    logger.error(`Project backup failed: ${result.error}`)
+    window.alert(`Project backup failed: ${result.error}`)
+  }
+}

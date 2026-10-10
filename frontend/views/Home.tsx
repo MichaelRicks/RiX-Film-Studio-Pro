@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { backupAllProjects } from '../lib/project-backup'
 import { Plus, Folder, MoreVertical, Trash2, Pencil, Upload, Copy, HardDriveDownload } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import { useView } from '../contexts/ViewContext'
@@ -319,6 +320,14 @@ export function Home() {
           </button>
           <input ref={importFileRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => void handleImportFile(e)} />
           {importError && <p className="text-[11px] text-red-400">{importError}</p>}
+          <button
+            onClick={() => void backupAllProjects()}
+            title="Copy every project's saved file to a folder you choose (ideally on another drive)"
+            className="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+          >
+            <HardDriveDownload className="h-4 w-4" />
+            Back Up All Projects...
+          </button>
         </div>
       </aside>
       

@@ -1,6 +1,6 @@
 import { app, Menu, shell, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
 
-export type MenuAction = 'new-project' | 'save-project' | 'export-project' | 'import-project' | 'show-keyboard-shortcuts'
+export type MenuAction = 'new-project' | 'save-project' | 'export-project' | 'import-project' | 'backup-all-projects' | 'show-keyboard-shortcuts'
 
 function sendMenuAction(window: BrowserWindow, action: MenuAction): void {
   window.webContents.send('menu-action', action)
@@ -22,6 +22,7 @@ export function createAppMenu(window: BrowserWindow): void {
         { label: 'Export Project...', click: () => sendMenuAction(window, 'export-project') },
         { type: 'separator' },
         { label: 'Import Project...', click: () => sendMenuAction(window, 'import-project') },
+        { label: 'Back Up All Projects...', click: () => sendMenuAction(window, 'backup-all-projects') },
         { type: 'separator' },
         { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],

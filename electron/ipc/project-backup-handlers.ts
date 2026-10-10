@@ -1,6 +1,8 @@
+import { dialog, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import { getProjectAssetsPath } from '../app-state'
+import { getProjectAssetsPath, readAppState, writeAppState } from '../app-state'
+import { getMainWindow } from '../window'
 import { logger } from '../logger'
 import { handle } from './typed-handle'
 
@@ -193,6 +195,67 @@ export function registerProjectBackupHandlers(): void {
     } catch (error) {
       logger.error(`Failed to save project ids: ${error}`)
       return { success: false as const, error: String(error) }
+    }
+  })
+
+  // "Back up all projects": copy every project's newest saved record (the small
+  // project.rix.json files, not the media) into a dated folder the user picks,
+  // ideally on another drive. The result is plain project folders, so restoring
+  // is copying them back into the projects folder.
+  handle('backupAllProjects', async () => {
+    try {
+      const win = getMainWindow()
+      const state = readAppState()
+      const dialogOptions = {
+        title: 'Choose a folder for the project backup',
+        defaultPath: typeof state.lastBackupDir === 'string' ? state.lastBackupDir : undefined,
+        properties: ['openDirectory' as const, 'createDirectory' as const],
+      }
+      const picked = win ? await dialog.showOpenDialog(win, dialogOptions) : await dialog.showOpenDialog(dialogOptions)
+      if (picked.canceled || !picked.filePaths.length) return { status: 'cancelled' as const }
+
+      const root = path.resolve(getProjectAssetsPath())
+      const chosen = path.resolve(picked.filePaths[0])
+      const rel = path.relative(root, chosen)
+      if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+        return { status: 'failed' as const, error: 'Choose a folder outside the projects folder, ideally on a different drive.' }
+      }
+
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const dest = path.join(chosen, `RiX-projects-backup-${stamp}`)
+      fs.mkdirSync(dest, { recursive: true })
+
+      const manifest: { projectId: string; name: string; updatedAt: number }[] = []
+      let skipped = 0
+      if (fs.existsSync(root)) {
+        for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+          if (!entry.isDirectory() || !PROJECT_ID_PATTERN.test(entry.name)) continue
+          const newest = newestBackup(entry.name)
+          if (!newest) continue
+          try {
+            const projectDest = path.join(dest, entry.name)
+            fs.mkdirSync(projectDest, { recursive: true })
+            fs.copyFileSync(newest.file, path.join(projectDest, PROJECT_BACKUP_FILE))
+            manifest.push({ projectId: entry.name, name: newest.name, updatedAt: newest.updatedAt })
+          } catch (error) {
+            skipped += 1
+            logger.warn(`Backup skipped project ${entry.name}: ${error}`)
+          }
+        }
+        if (fs.existsSync(projectIdsPath())) fs.copyFileSync(projectIdsPath(), path.join(dest, '.project-ids.json'))
+      }
+      fs.writeFileSync(path.join(dest, 'backup-manifest.json'), JSON.stringify({ createdAt: Date.now(), source: root, projects: manifest }, null, 2), 'utf-8')
+      writeAppState({ ...readAppState(), lastBackupDir: chosen })
+
+      const detail = skipped > 0 ? `${manifest.length} projects backed up, ${skipped} could not be read.` : `${manifest.length} projects backed up.`
+      const choice = win
+        ? await dialog.showMessageBox(win, { type: 'info', message: 'Project backup complete', detail: `${detail}\n\n${dest}`, buttons: ['Show in Explorer', 'OK'], defaultId: 1 })
+        : { response: 1 }
+      if (choice.response === 0) shell.showItemInFolder(dest)
+      return { status: 'done' as const, count: manifest.length, folder: dest }
+    } catch (error) {
+      logger.error(`Failed to back up all projects: ${error}`)
+      return { status: 'failed' as const, error: String(error) }
     }
   })
 
