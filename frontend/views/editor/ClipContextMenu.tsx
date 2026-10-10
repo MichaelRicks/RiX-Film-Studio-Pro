@@ -53,6 +53,7 @@ export interface ClipContextMenuProps {
   onCaptureFrameForVideo: (clip: TimelineClip) => void
   onCreateVideoFromAudio: (clip: TimelineClip) => void
   copyFadesForward: (clipId: string) => void
+  clearFadesForward: (clipId: string) => void
 }
 
 /** True when the clip, or an audio clip linked to it, has a fade or transition to copy forward. */
@@ -135,6 +136,7 @@ export function ClipContextMenu({
   onCaptureFrameForVideo,
   onCreateVideoFromAudio,
   copyFadesForward,
+  clearFadesForward,
 }: ClipContextMenuProps) {
   const close = () => setClipContextMenu(null)
   const isBackground = clipContextMenu.kind === 'background'
@@ -249,6 +251,7 @@ export function ClipContextMenu({
           onCaptureFrameForVideo={onCaptureFrameForVideo}
           onCreateVideoFromAudio={onCreateVideoFromAudio}
           copyFadesForward={copyFadesForward}
+          clearFadesForward={clearFadesForward}
           close={close}
         />
       ) : null}
@@ -282,6 +285,7 @@ function SingleClipMenu({
   onCaptureFrameForVideo,
   onCreateVideoFromAudio,
   copyFadesForward,
+  clearFadesForward,
   close,
 }: {
   contextClip: TimelineClip
@@ -312,6 +316,7 @@ function SingleClipMenu({
   onCaptureFrameForVideo: (clip: TimelineClip) => void
   onCreateVideoFromAudio: (clip: TimelineClip) => void
   copyFadesForward: (clipId: string) => void
+  clearFadesForward: (clipId: string) => void
   close: () => void
 }) {
   const liveAsset = getLiveAsset(contextClip)
@@ -337,6 +342,9 @@ function SingleClipMenu({
           title="Copy this clip's fade in / fade out (and dissolve or fade from/to black) onto every later clip on its track"
           onClick={() => { copyFadesForward(contextClip.id); close() }} />
       )}
+      <MenuItem icon={ChevronRight} label="Remove Fades from Here Forward"
+        title="Remove fades and transitions from this clip and every later clip on its track"
+        onClick={() => { clearFadesForward(contextClip.id); close() }} />
 
       <Divider />
 

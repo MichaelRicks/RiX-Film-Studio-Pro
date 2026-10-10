@@ -712,6 +712,28 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     setClips(prev => prev.map(c => (patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c)))
   }, [clips, setClips])
 
+  // Strip fades and transitions (dissolves, fade from/to black, audio fades) from
+  // every clip on a track that starts at or after `fromTime`. `keepInId` keeps that
+  // clip's own fade-in: from a cut, the left clip's start belongs to the cut before.
+  const clearFadesForward = useCallback((trackIndex: number, isAudio: boolean, fromTime: number, keepInId?: string) => {
+    const none = { type: 'none' as const, duration: 0.5 }
+    setClips(prev => prev.map(c => {
+      if (c.trackIndex !== trackIndex || (c.type === 'audio') !== isAudio || c.startTime < fromTime - CUT_POINT_TOLERANCE) return c
+      const keepIn = c.id === keepInId
+      return isAudio
+        ? { ...c, ...(keepIn ? {} : { audioFadeIn: 0 }), audioFadeOut: 0 }
+        : { ...c, ...(keepIn ? {} : { transitionIn: none }), transitionOut: none }
+    }))
+  }, [setClips])
+
+  // Same from a clip: it and every later clip on its track, plus linked audio on its own track.
+  const clearClipFadesForward = useCallback((clipId: string) => {
+    const source = clips.find(c => c.id === clipId)
+    if (!source) return
+    const group = [source, ...(source.linkedClipIds ?? []).map(id => clips.find(c => c.id === id)).filter((c): c is TimelineClip => !!c)]
+    for (const src of group) clearFadesForward(src.trackIndex, src.type === 'audio', src.startTime)
+  }, [clips, clearFadesForward])
+
   const removeClip = useCallback((clipId: string) => {
     const clip = clips.find(candidate => candidate.id === clipId)
     if (clip && tracks[clip.trackIndex]?.locked) return
@@ -3675,6 +3697,13 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                                     All forward ▸ ({laterSeams.length})
                                   </button>
                                 )}
+                                <button
+                                  className="px-2 py-0.5 rounded bg-red-950/80 border border-red-800 text-[9px] text-red-300 hover:bg-red-900 transition-colors shadow-lg"
+                                  title="Remove every fade and transition from this cut to the end of this track"
+                                  onClick={() => clearFadesForward(cp.trackIndex, cp.isAudio, cp.leftClip.startTime, cp.leftClip.id)}
+                                >
+                                  Remove all ▸
+                                </button>
                               </>
                             ) : (
                               <>
@@ -3928,6 +3957,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
           onCaptureFrameForVideo={onCaptureFrameForVideo}
           onCreateVideoFromAudio={onCreateVideoFromAudio}
           copyFadesForward={copyFadesForward}
+          clearFadesForward={clearClipFadesForward}
         />
       )}
       {selectedGap && tracks[selectedGap.trackIndex]?.kind !== 'audio' && (
