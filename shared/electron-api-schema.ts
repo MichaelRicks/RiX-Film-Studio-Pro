@@ -478,6 +478,17 @@ export const electronAPISchemas = {
     output: z.void(),
   },
 
+  // Preview playback of a reversed clip: renders (once, cached) a reversed copy of the
+  // source so the editor can play it forward with sound. Preview only; export reverses
+  // the original. `failed` leaves the clip on the old paused-frame behaviour.
+  ensureReverseProxy: {
+    input: z.object({ srcPath: z.string() }),
+    output: z.discriminatedUnion('status', [
+      z.object({ status: z.literal('ready'), path: z.string() }),
+      z.object({ status: z.literal('failed'), error: z.string() }),
+    ]),
+  },
+
   // Video processing
   extractVideoFrame: {
     input: z.object({ videoPath: z.string(), seekTime: z.number(), width: z.number().optional(), quality: z.number().optional(), outputPath: z.string().optional() }),

@@ -10,6 +10,7 @@ import { registerProjectBackupHandlers } from './ipc/project-backup-handlers'
 import { registerLibraryHandlers } from './ipc/library-handlers'
 import { registerLogHandlers } from './ipc/log-handlers'
 import { registerVideoProcessingHandlers } from './ipc/video-processing-handlers'
+import { registerReverseProxyHandlers } from './ipc/reverse-proxy-handlers'
 import { logger } from './logger'
 import { startMcpServer } from './mcp/mcp-server'
 import { initSessionLog } from './logging-management'
@@ -42,6 +43,7 @@ if (!gotLock) {
   registerLogHandlers()
   registerExportHandlers()
   registerVideoProcessingHandlers()
+  registerReverseProxyHandlers()
   startMcpServer()
 
   app.on('second-instance', () => {

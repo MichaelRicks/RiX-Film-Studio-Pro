@@ -35,6 +35,7 @@ import {
   selectTracks,
 } from './editor-selectors'
 import { useEditorActions, useEditorStore } from './editor-store'
+import { usePlaybackClips } from './reverse-proxy'
 import { isDroppedMediaEvent, isNativeAssetDragEvent, readDroppedAsset, readDroppedMediaAsset } from './dropped-media-asset'
 
 type MonitorRenderMode = 'playback' | 'scrub'
@@ -104,6 +105,8 @@ const BASE_VIDEO_STYLE = 'position:absolute;inset:0;width:100%;height:100%;objec
 const VIDEO_POOL_PREROLL_SECONDS = 1.5
 
 function resolveClipPathFromAssets(assets: Asset[], clip: TimelineClip): string {
+  const proxyPath = (clip as { proxyPath?: string }).proxyPath
+  if (proxyPath) return proxyPath
   const liveAsset = clip.assetId
     ? assets.find(asset => asset.id === clip.assetId) || clip.asset
     : clip.asset
@@ -529,7 +532,9 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
   const totalDuration = useEditorStore(selectTotalDuration)
   const isPlaying = useEditorStore(selectIsPlaying)
   const assets = useEditorStore(selectAssets)
-  const clips = useEditorStore(selectClips)
+  const timelineClips = useEditorStore(selectClips)
+  // Reversed clips play from a cached reversed copy once it is ready (reverse-proxy.ts).
+  const clips = usePlaybackClips(timelineClips, assets)
   const tracks = useEditorStore(selectTracks)
   const subtitles = useEditorStore(selectSubtitles)
   const getClipPath = React.useCallback((clip: TimelineClip) => resolveClipPathFromAssets(assets, clip), [assets])

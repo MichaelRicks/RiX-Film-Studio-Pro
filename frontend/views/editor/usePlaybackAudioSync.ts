@@ -12,6 +12,7 @@ import {
 } from './editor-selectors'
 import { useEditorGetState, useEditorStore } from './editor-store'
 import { volumeAtTime } from './video-editor-utils'
+import { toPlaybackClips } from './reverse-proxy'
 
 interface UsePlaybackAudioSyncParams {
   playbackTimeRef: React.MutableRefObject<number>
@@ -120,9 +121,10 @@ export function usePlaybackAudioSync(params: UsePlaybackAudioSyncParams) {
 
     const tick = (timestamp: number) => {
       const editorState = getEditorState()
-      const allClips = selectClips(editorState)
-      const currentTracks = selectTracks(editorState)
       const currentAssets = selectAssets(editorState)
+      // Reversed clips play from a cached reversed copy once it is ready (reverse-proxy.ts).
+      const allClips = toPlaybackClips(selectClips(editorState), currentAssets)
+      const currentTracks = selectTracks(editorState)
       const atTime = playbackTimeRef.current
       const audioMap = audioElementsRef.current
 

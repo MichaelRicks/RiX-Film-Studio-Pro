@@ -470,6 +470,9 @@ export function selectLiveAssetForClip(state: EditorState, clip: TimelineClip | 
 
 export function selectClipPathFromAssets(assets: Asset[], clip: TimelineClip | null | undefined): string {
   if (!clip) return ''
+  // Playback copies of reversed clips carry the path of their reversed proxy (reverse-proxy.ts).
+  const proxyPath = (clip as { proxyPath?: string }).proxyPath
+  if (proxyPath) return proxyPath
   const liveAsset = selectLiveAssetForClipFromAssets(assets, clip)
   let src = clip.asset?.path || ''
   if (liveAsset) {
