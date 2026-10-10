@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { backupAllProjects } from '../lib/project-backup'
+import { RestoreBackupDialog, type RestoreBackupListing } from '../components/RestoreBackupDialog'
 import { Plus, Folder, MoreVertical, Trash2, Pencil, Upload, Copy, HardDriveDownload } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import { useView } from '../contexts/ViewContext'
@@ -148,6 +149,32 @@ export function Home() {
   const [restoreError, setRestoreError] = useState<string | null>(null)
   const migrationStartedRef = useRef(false)
 
+  const [restoreListing, setRestoreListing] = useState<RestoreBackupListing | null>(null)
+  const [restoreFromBackupError, setRestoreFromBackupError] = useState<string | null>(null)
+
+  const handleChooseBackup = async () => {
+    setRestoreFromBackupError(null)
+    const result = await window.electronAPI?.inspectProjectBackup()
+    if (!result || result.status === 'cancelled') return
+    if (result.status === 'failed') { setRestoreFromBackupError(result.error); return }
+    setRestoreListing(result)
+  }
+
+  const handleRestoreFromBackup = async (projectIds: string[]) => {
+    if (!restoreListing) return
+    const { projects: records, failed } = await window.electronAPI.readProjectsFromBackup({ folder: restoreListing.folder, projectIds })
+    const couldNot = failed.map(f => f.projectId)
+    for (const record of records) {
+      try {
+        restoreProject(JSON.parse(record.data))
+      } catch {
+        couldNot.push(record.name)
+      }
+    }
+    setRestoreListing(null)
+    setRestoreFromBackupError(couldNot.length > 0 ? `Couldn't restore: ${couldNot.join(', ')}` : null)
+  }
+
   const handleImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
@@ -175,6 +202,7 @@ export function Home() {
       const action = (e as CustomEvent).detail
       if (action === 'new-project') setIsCreating(true)
       else if (action === 'import-project') importFileRef.current?.click()
+      else if (action === 'restore-from-backup') void handleChooseBackup()
     }
     window.addEventListener('ltx:menu-action', handler)
     return () => window.removeEventListener('ltx:menu-action', handler)
@@ -328,6 +356,22 @@ export function Home() {
             <HardDriveDownload className="h-4 w-4" />
             Back Up All Projects...
           </button>
+          <button
+            onClick={() => void handleChooseBackup()}
+            title="Bring projects back from a backup folder made with Back Up All Projects"
+            className="w-full px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium flex items-center justify-center gap-2 transition-colors"
+          >
+            <HardDriveDownload className="h-4 w-4 rotate-180" />
+            Restore From Backup...
+          </button>
+          {restoreFromBackupError && <p className="text-[11px] text-red-400">{restoreFromBackupError}</p>}
+          {restoreListing && (
+            <RestoreBackupDialog
+              listing={restoreListing}
+              onCancel={() => setRestoreListing(null)}
+              onRestore={(ids) => void handleRestoreFromBackup(ids)}
+            />
+          )}
         </div>
       </aside>
       

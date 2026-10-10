@@ -340,6 +340,35 @@ export const electronAPISchemas = {
     input: z.object({ projectId: z.string() }),
     output: emptyResult,
   },
+  // Restore from a backup made by backupAllProjects: step 1 picks a folder and lists
+  // what is in it against the current projects; step 2 reads the chosen records
+  // (keeping a copy of each record it will replace) for the renderer to put back.
+  inspectProjectBackup: {
+    input: z.object({}),
+    output: z.discriminatedUnion('status', [
+      z.object({
+        status: z.literal('ok'),
+        folder: z.string(),
+        createdAt: z.number().nullable(),
+        projects: z.array(z.object({
+          projectId: z.string(),
+          name: z.string(),
+          updatedAt: z.number(),
+          assetCount: z.number(),
+          status: z.enum(['missing', 'newer', 'older', 'same']),
+        })),
+      }),
+      z.object({ status: z.literal('cancelled') }),
+      z.object({ status: z.literal('failed'), error: z.string() }),
+    ]),
+  },
+  readProjectsFromBackup: {
+    input: z.object({ folder: z.string(), projectIds: z.array(z.string()) }),
+    output: z.object({
+      projects: z.array(z.object({ projectId: z.string(), name: z.string(), data: z.string() })),
+      failed: z.array(z.object({ projectId: z.string(), error: z.string() })),
+    }),
+  },
   // Asks for a folder and copies every project's saved record into a dated
   // subfolder there (project files only, not media). Shows its own result dialog.
   backupAllProjects: {

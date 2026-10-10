@@ -91,6 +91,33 @@ function newestBackup(projectId: string): BackupSummary | null {
   return candidates.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null
 }
 
+const BACKUP_FOLDER_PREFIX = 'RiX-projects-backup-'
+
+function hasProjectFolders(dir: string): boolean {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).some(entry => (
+      entry.isDirectory() && PROJECT_ID_PATTERN.test(entry.name) && fs.existsSync(path.join(dir, entry.name, PROJECT_BACKUP_FILE))
+    ))
+  } catch {
+    return false
+  }
+}
+
+/** The folder holding the project folders: the one picked, or the newest dated backup inside it. */
+function resolveBackupRoot(chosen: string): string | null {
+  if (hasProjectFolders(chosen)) return chosen
+  try {
+    const dated = fs.readdirSync(chosen, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name.startsWith(BACKUP_FOLDER_PREFIX))
+      .map(entry => path.join(chosen, entry.name))
+      .filter(hasProjectFolders)
+      .sort()
+    return dated[dated.length - 1] ?? null
+  } catch {
+    return null
+  }
+}
+
 export function registerProjectBackupHandlers(): void {
   handle('saveProjectBackup', ({ projectId, data }) => {
     try {
@@ -257,6 +284,76 @@ export function registerProjectBackupHandlers(): void {
       logger.error(`Failed to back up all projects: ${error}`)
       return { status: 'failed' as const, error: String(error) }
     }
+  })
+
+  // Restore, step 1: pick a backup folder and compare what is in it with what the
+  // app has now, so the user can choose what to bring back.
+  handle('inspectProjectBackup', async () => {
+    try {
+      const win = getMainWindow()
+      const state = readAppState()
+      const options = {
+        title: 'Choose the backup folder to restore from',
+        defaultPath: typeof state.lastBackupDir === 'string' ? state.lastBackupDir : undefined,
+        properties: ['openDirectory' as const],
+      }
+      const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      if (picked.canceled || !picked.filePaths.length) return { status: 'cancelled' as const }
+
+      const folder = resolveBackupRoot(path.resolve(picked.filePaths[0]))
+      if (!folder) return { status: 'failed' as const, error: 'No project backup found in that folder. Pick a "RiX-projects-backup-…" folder, or the folder that contains them.' }
+
+      let createdAt: number | null = null
+      try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(folder, 'backup-manifest.json'), 'utf-8')) as { createdAt?: unknown }
+        if (typeof manifest.createdAt === 'number') createdAt = manifest.createdAt
+      } catch { /* a folder without a manifest (an older snapshot) still restores */ }
+
+      const projects: { projectId: string; name: string; updatedAt: number; assetCount: number; status: 'missing' | 'newer' | 'older' | 'same' }[] = []
+      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !PROJECT_ID_PATTERN.test(entry.name)) continue
+        const inBackup = summarize(path.join(folder, entry.name, PROJECT_BACKUP_FILE), entry.name)
+        if (!inBackup) continue
+        const current = newestBackup(entry.name)
+        const status = !current ? 'missing' : inBackup.updatedAt > current.updatedAt ? 'newer' : inBackup.updatedAt < current.updatedAt ? 'older' : 'same'
+        projects.push({ projectId: entry.name, name: inBackup.name, updatedAt: inBackup.updatedAt, assetCount: inBackup.assetCount, status })
+      }
+      return { status: 'ok' as const, folder, createdAt, projects }
+    } catch (error) {
+      logger.error(`Failed to inspect project backup: ${error}`)
+      return { status: 'failed' as const, error: String(error) }
+    }
+  })
+
+  // Restore, step 2: hand the chosen projects to the renderer. Each one's current
+  // record is first copied aside (project.rix.before-restore-<time>.json), and the
+  // restored record is stamped as just edited so it wins over the copy it replaces.
+  handle('readProjectsFromBackup', ({ folder, projectIds }) => {
+    const projects: { projectId: string; name: string; data: string }[] = []
+    const failed: { projectId: string; error: string }[] = []
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    for (const projectId of projectIds) {
+      try {
+        if (!PROJECT_ID_PATTERN.test(projectId)) throw new Error('Invalid project id')
+        const source = path.join(path.resolve(folder), projectId, PROJECT_BACKUP_FILE)
+        const record = JSON.parse(fs.readFileSync(source, 'utf-8')) as Record<string, unknown>
+        const current = newestBackup(projectId)
+        if (current) {
+          fs.copyFileSync(current.file, path.join(path.dirname(current.file), `project.rix.before-restore-${stamp}.json`))
+        }
+        const deleted = readDeletedProjects()
+        if (projectId in deleted) {
+          delete deleted[projectId]
+          writeDeletedProjects(deleted)
+        }
+        record.updatedAt = Date.now()
+        projects.push({ projectId, name: typeof record.name === 'string' ? record.name : projectId, data: JSON.stringify(record) })
+      } catch (error) {
+        logger.warn(`Restore skipped project ${projectId}: ${error}`)
+        failed.push({ projectId, error: String(error) })
+      }
+    }
+    return { projects, failed }
   })
 
   handle('deleteProjectBackup', ({ projectId }) => {
