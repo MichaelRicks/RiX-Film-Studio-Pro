@@ -33,7 +33,9 @@ function ProjectCard({ project, onOpen, onDelete, onRename, onDuplicate }: {
   const [imgError, setImgError] = useState(false)
   
   // Keep existing representative selection logic: prefer first image, else first asset.
-  const representativeAsset = project.assets.find(a => a.type === 'image') || project.assets[0] || null
+  // Color mattes are solid fills, so they never make a useful cover.
+  const coverable = project.assets.filter(a => !a.matteColor)
+  const representativeAsset = coverable.find(a => a.type === 'image') || coverable[0] || project.assets[0] || null
   const representativeUrl = representativeAsset?.path ? pathToFileUrl(representativeAsset.path) : null
   const representativeBigThumbnailUrl = representativeAsset?.bigThumbnailPath
     ? pathToFileUrl(representativeAsset.bigThumbnailPath)
