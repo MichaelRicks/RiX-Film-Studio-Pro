@@ -1,4 +1,5 @@
 import React from 'react'
+import { useColorMatte } from './useColorMatte'
 import {
   Clipboard, Copy, Scissors, Trash2, Layers, Type, X, RefreshCw,
   ZoomIn, Film, Eye, FolderOpen, RotateCcw, Volume2, VolumeX,
@@ -138,6 +139,7 @@ export function ClipContextMenu({
   copyFadesForward,
   clearFadesForward,
 }: ClipContextMenuProps) {
+  const { addColorMatte } = useColorMatte()
   const close = () => setClipContextMenu(null)
   const isBackground = clipContextMenu.kind === 'background'
 
@@ -191,6 +193,8 @@ export function ClipContextMenu({
               <span className="flex-1 truncate">{preset.name}</span>
             </button>
           ))}
+          <MenuItem icon={Layers} label="Add Color Matte"
+            onClick={() => { void addColorMatte(); close() }} />
           <Divider />
           <MenuItem icon={Layers} label="Select All" shortcut="Ctrl+A"
             onClick={() => { setSelectedClipIds(new Set(clips.map(c => c.id))); close() }} />

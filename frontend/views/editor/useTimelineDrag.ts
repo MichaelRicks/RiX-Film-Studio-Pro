@@ -96,6 +96,40 @@ interface UseTimelineDragParams {
   subtitleTrackHeight: number
 }
 
+/** See the commit in handleMouseUp: a moved clip that fully covers a clip on its
+ *  new track sends that clip to the track the mover left. */
+function swapCoveredClips(
+  clips: TimelineClip[],
+  movedIds: Set<string>,
+  originalPositions: Record<string, { startTime: number; trackIndex: number }>,
+  tracks: { kind?: string; type?: string; locked?: boolean }[],
+): TimelineClip[] {
+  const EPS = 1e-3
+  const reassigned = new Map<string, number>()
+  for (const id of movedIds) {
+    const mover = clips.find(c => c.id === id)
+    const from = originalPositions[id]?.trackIndex
+    if (!mover || from === undefined || from === mover.trackIndex) continue
+    const fromTrack = tracks[from]
+    const toTrack = tracks[mover.trackIndex]
+    if (!fromTrack || !toTrack || fromTrack.locked || toTrack.locked) continue
+    if (fromTrack.kind !== toTrack.kind || fromTrack.type !== toTrack.type) continue
+    const moverEnd = mover.startTime + mover.duration
+    const covered = clips.filter(c =>
+      !movedIds.has(c.id) && !reassigned.has(c.id) && c.trackIndex === mover.trackIndex &&
+      c.type === mover.type &&
+      c.startTime >= mover.startTime - EPS && c.startTime + c.duration <= moverEnd + EPS)
+    if (covered.length !== 1) continue
+    const victim = covered[0]
+    const collides = clips.some(c =>
+      c.id !== victim.id && !movedIds.has(c.id) && (reassigned.get(c.id) ?? c.trackIndex) === from &&
+      c.startTime < victim.startTime + victim.duration - EPS && c.startTime + c.duration > victim.startTime + EPS)
+    if (collides) continue
+    reassigned.set(victim.id, from)
+  }
+  return reassigned.size === 0 ? clips : clips.map(c => (reassigned.has(c.id) ? { ...c, trackIndex: reassigned.get(c.id)! } : c))
+}
+
 export function useTimelineDrag(params: UseTimelineDragParams) {
   const {
     activeTool,
@@ -619,7 +653,12 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
             trackIndex: target.trackIndex,
           }
         })
-        return resolveOverlaps(positioned, movedIds)
+        // Dropping a clip onto a track where it would completely cover another
+        // clip swaps the two tracks' occupants instead of erasing the one
+        // underneath. Only a clean swap: same kind of track, unlocked, and the
+        // covered clip has to fit where the dragged one came from.
+        const swapped = draggingClip.isDuplicate ? positioned : swapCoveredClips(positioned, movedIds, originalPositions, tracks)
+        return resolveOverlaps(swapped, movedIds)
       })
       clearDragPreviewDom()
     }
@@ -629,7 +668,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
     
     setDraggingClip(null)
     setResizingClip(null)
-  }, [lassoRect, clips, pixelsPerSecond, draggingClip, resizingClip, setClips, getTrackHeight, trackTopPx, clearDragPreviewDom])
+  }, [lassoRect, clips, pixelsPerSecond, draggingClip, resizingClip, setClips, tracks, getTrackHeight, trackTopPx, clearDragPreviewDom])
   
   const handleResizeMove = useCallback((e: MouseEvent) => {
     if (!resizingClip) return

@@ -317,6 +317,8 @@ export const assetSchema = z.object({
   colorLabel: z.string().optional(),
   // Wall-clock time the render took, in milliseconds (local generations only).
   renderMs: z.number().optional(),
+  // Set on a solid-color still made by Add Color Matte; the color it was painted.
+  matteColor: z.string().optional(),
 })
 
 /** Where a media clip sits in the frame and how big it is. `x`/`y` are the

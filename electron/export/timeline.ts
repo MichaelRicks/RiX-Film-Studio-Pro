@@ -51,6 +51,11 @@ export interface OverlayLayer {
  *  off reads as a glitch, so a layer fades at both ends unless told otherwise. */
 export const DEFAULT_LAYER_FADE = 0.5
 
+/** Mirrors defaultLayerFade in video-editor-utils: only images fade by default. */
+export function defaultLayerFade(type: string | undefined): number {
+  return type === 'image' ? DEFAULT_LAYER_FADE : 0
+}
+
 const DEFAULT_LAYER: ClipLayer = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1 }
 
 /**

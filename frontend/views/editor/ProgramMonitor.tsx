@@ -1477,7 +1477,7 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
                   {/* EFFECTS HIDDEN - masked effect overlays, vignette, and grain hidden because effects are not applied during export */}
 
                   {/* Audio waveform or empty state when no video/image clip is visible */}
-                  {!monitorClip && (() => {
+                  {!monitorClip && layerStack.length === 0 && (() => {
                     const audioAtPlayhead = frameScene.audioOnlyClips
                     return audioAtPlayhead.length > 0 ? (
                       <div className="absolute inset-0">

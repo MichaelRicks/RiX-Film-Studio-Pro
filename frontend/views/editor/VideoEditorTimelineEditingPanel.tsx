@@ -444,6 +444,9 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   const renameInputRef = useRef<HTMLInputElement>(null)
 
   const [bladeHoverInfo, setBladeHoverInfo] = useState<{ clipId: string; offsetX: number; time: number } | null>(null)
+  // Track header being dragged to a new slot, and the header it is hovering over.
+  const [draggingTrackId, setDraggingTrackId] = useState<string | null>(null)
+  const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null)
   const [hoveredCutPoint, setHoveredCutPoint] = useState<{
     leftClipId: string; rightClipId: string; time: number; trackIndex: number
   } | null>(null)
@@ -711,6 +714,27 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     if (patches.size === 0) return
     setClips(prev => prev.map(c => (patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c)))
   }, [clips, setClips])
+
+  // Remove one clip's transition on its own, and the partner half on the clip it
+  // butts up against (a seam holds both). A transition left behind by moving or
+  // trimming clips apart has no seam on the timeline to remove it from, so this
+  // is the way to get rid of it without the side panel.
+  const removeClipTransition = useCallback((clipId: string, side: 'in' | 'out') => {
+    const none = { type: 'none' as const, duration: 0.5 }
+    setClips(prev => {
+      const clip = prev.find(c => c.id === clipId)
+      if (!clip) return prev
+      const edge = side === 'in' ? clip.startTime : clip.startTime + clip.duration
+      const partner = prev.find(c =>
+        c.id !== clip.id && c.trackIndex === clip.trackIndex && c.type !== 'audio' &&
+        Math.abs((side === 'in' ? c.startTime + c.duration : c.startTime) - edge) < CUT_POINT_TOLERANCE)
+      return prev.map(c => {
+        if (c.id === clip.id) return side === 'in' ? { ...c, transitionIn: none } : { ...c, transitionOut: none }
+        if (partner && c.id === partner.id) return side === 'in' ? { ...c, transitionOut: none } : { ...c, transitionIn: none }
+        return c
+      })
+    })
+  }, [setClips])
 
   // Strip fades and transitions (dissolves, fade from/to black, audio fades) from
   // every clip on a track that starts at or after `fromTime`. `keepInId` keeps that
@@ -2250,7 +2274,23 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                       </div>
                     )}
                     <div 
+                      onDragOver={(e) => {
+                        const dragged = draggingTrackId ? tracks.find(t => t.id === draggingTrackId) : null
+                        if (!dragged || dragged.id === track.id || dragged.type !== track.type || dragged.kind !== track.kind) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dragOverTrackId !== track.id) setDragOverTrackId(track.id)
+                      }}
+                      onDrop={(e) => {
+                        if (!draggingTrackId || dragOverTrackId !== track.id) return
+                        e.preventDefault()
+                        actions.moveTrack(draggingTrackId, track.id)
+                        setDraggingTrackId(null)
+                        setDragOverTrackId(null)
+                      }}
                       className={`group flex-shrink-0 border-b border-zinc-800 text-xs relative ${
+                        dragOverTrackId === track.id && draggingTrackId ? 'ring-1 ring-inset ring-blue-400 bg-blue-500/10 ' : ''
+                      }${draggingTrackId === track.id ? 'opacity-40 ' : ''}${
                         track.type === 'subtitle'
                           ? 'bg-amber-950/20 px-1.5 flex flex-col justify-center gap-0'
                           : track.kind === 'audio'
@@ -2320,6 +2360,19 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                       ) : (
                       <>
                       <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+                        <div
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'move'
+                            e.dataTransfer.setData('text/plain', track.id)
+                            setDraggingTrackId(track.id)
+                          }}
+                          onDragEnd={() => { setDraggingTrackId(null); setDragOverTrackId(null) }}
+                          className="flex-shrink-0 cursor-grab text-zinc-600 hover:text-zinc-300"
+                          title="Drag to reorder this track"
+                        >
+                          <GripVertical className="h-3 w-3" />
+                        </div>
                         <Tooltip content={track.sourcePatched !== false ? 'Source patched (click to unpatch)' : 'Source unpatched (click to patch)'} side="right">
                           <button
                             onClick={() => setTracks(tracks.map((t, i) => i === realIndex ? {...t, sourcePatched: !(t.sourcePatched !== false)} : t))}
@@ -3221,7 +3274,14 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                             width: `${Math.min(clip.transitionIn.duration / clip.duration * 100, 50)}%`,
                             background: 'linear-gradient(to right, rgba(139,92,246,0.4), transparent)',
                           }}
-                        />
+                        >
+                          <button
+                            className="pointer-events-auto absolute top-0.5 left-0.5 h-3.5 w-3.5 rounded bg-black/60 text-[10px] leading-none text-red-300 hover:bg-red-800"
+                            title="Remove this transition"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); removeClipTransition(clip.id, 'in') }}
+                          >×</button>
+                        </div>
                       )}
                       {/* Transition out indicator */}
                       {clip.transitionOut?.type !== 'none' && clip.transitionOut?.duration > 0 && (
@@ -3231,7 +3291,14 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                             width: `${Math.min(clip.transitionOut.duration / clip.duration * 100, 50)}%`,
                             background: 'linear-gradient(to left, rgba(139,92,246,0.4), transparent)',
                           }}
-                        />
+                        >
+                          <button
+                            className="pointer-events-auto absolute top-0.5 right-0.5 h-3.5 w-3.5 rounded bg-black/60 text-[10px] leading-none text-red-300 hover:bg-red-800"
+                            title="Remove this transition"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); removeClipTransition(clip.id, 'out') }}
+                          >×</button>
+                        </div>
                       )}
                       
                       {/* Resolution color-code bar at the bottom of the clip */}

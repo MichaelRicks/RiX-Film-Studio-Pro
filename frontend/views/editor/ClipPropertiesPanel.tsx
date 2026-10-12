@@ -11,7 +11,7 @@ import type { Asset, ClipLayerFrame, TimelineClip, LetterboxSettings, TextOverla
 import { DEFAULT_COLOR_CORRECTION, DEFAULT_LETTERBOX } from '../../types/project-model' // EFFECTS HIDDEN: removed EFFECT_DEFINITIONS, DEFAULT_EFFECT_MASK
 import { TEXT_PRESETS } from '../../types/project'
 import { namedResolutionTier } from '../../lib/video-resolution'
-import { clipLayerAt, DEFAULT_LAYER_FADE, formatTime, isLayerClip } from './video-editor-utils'
+import { clipLayerAt, defaultLayerFade, formatTime, isLayerClip } from './video-editor-utils'
 import { Tooltip } from '../../components/ui/tooltip'
 import {
   selectAssets,
@@ -24,6 +24,7 @@ import {
 import { useEditorActions, useEditorStore } from './editor-store'
 import { FontPicker } from '../../components/FontPicker'
 import { FilmLookPicker } from './FilmLookPicker'
+import { MatteColorRow } from './MatteColorRow'
 import { FILM_LOOKS_BY_ID } from '../../../shared/film-looks'
 import { pathToFileUrl } from '../../lib/file-url'
 import { setOpacityPreview } from './text-opacity-preview'
@@ -902,14 +903,14 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
                 <span className="text-[10px] text-zinc-400 w-12">Fade</span>
                 <input
                   type="number" step={0.1} min={0} max={Math.max(0, selectedClip.duration / 2)}
-                  value={selectedClip.fadeIn ?? DEFAULT_LAYER_FADE}
+                  value={selectedClip.fadeIn ?? defaultLayerFade(selectedClip.type)}
                   title="Fade up at the start, in seconds (0 = hard cut)"
                   className="w-14 px-1.5 py-1 rounded bg-zinc-800 border border-zinc-700 text-[11px] text-zinc-200 tabular-nums focus:outline-none focus:border-blue-500"
                   onChange={(e) => updateClip(selectedClip.id, { fadeIn: Math.max(0, parseFloat(e.target.value) || 0) })}
                 />
                 <input
                   type="number" step={0.1} min={0} max={Math.max(0, selectedClip.duration / 2)}
-                  value={selectedClip.fadeOut ?? DEFAULT_LAYER_FADE}
+                  value={selectedClip.fadeOut ?? defaultLayerFade(selectedClip.type)}
                   title="Fade down at the end, in seconds (0 = hard cut)"
                   className="w-14 px-1.5 py-1 rounded bg-zinc-800 border border-zinc-700 text-[11px] text-zinc-200 tabular-nums focus:outline-none focus:border-blue-500"
                   onChange={(e) => updateClip(selectedClip.id, { fadeOut: Math.max(0, parseFloat(e.target.value) || 0) })}
@@ -919,6 +920,8 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
             )}
           </div>
         )}
+
+        {selectedClip.asset?.matteColor && <MatteColorRow clip={selectedClip} />}
 
         {/* --- Transform: place and size a clip in the frame (logos, graphics,
                punch-ins). Keyframe it to animate. Dragging the box in the program

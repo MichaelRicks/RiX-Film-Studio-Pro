@@ -1573,6 +1573,45 @@ export function addTrack(state: EditorState, kind: 'video' | 'audio'): EditorSta
   })
 }
 
+/** Drag-reorder: the track `trackId` takes the slot `targetTrackId` holds and the
+ *  tracks between shift over. Only within one kind (video, audio), since the
+ *  timeline keeps video above audio. Clips and subtitles follow their track, and
+ *  default-named tracks (V1, V2, A1...) are renumbered so the labels still read
+ *  bottom-up in stacking order. */
+export function moveTrack(state: EditorState, trackId: string, targetTrackId: string): EditorState {
+  const tracks = selectTracks(state)
+  const from = tracks.findIndex(track => track.id === trackId)
+  const to = tracks.findIndex(track => track.id === targetTrackId)
+  if (from < 0 || to < 0 || from === to) return state
+  const a = tracks[from]
+  const b = tracks[to]
+  if (a.type !== b.type || a.kind !== b.kind) return state
+
+  const order = tracks.map((_, i) => i)
+  order.splice(from, 1)
+  order.splice(to, 0, from)
+  // order[newIndex] = oldIndex
+  const newIndexOf = new Map<number, number>()
+  order.forEach((oldIndex, newIndex) => newIndexOf.set(oldIndex, newIndex))
+
+  const counters = { video: 0, audio: 0 }
+  const nextTracks = order.map(oldIndex => {
+    const track = tracks[oldIndex]
+    if (track.type === 'subtitle') return track
+    const kind = track.kind === 'audio' ? 'audio' : 'video'
+    counters[kind] += 1
+    const auto = kind === 'audio' ? /^A\d+$/ : /^V\d+$/
+    return auto.test(track.name) ? { ...track, name: `${kind === 'audio' ? 'A' : 'V'}${counters[kind]}` } : track
+  })
+
+  return replaceActiveTimeline(state, timeline => ({
+    ...timeline,
+    tracks: nextTracks,
+    clips: timeline.clips.map(clip => ({ ...clip, trackIndex: newIndexOf.get(clip.trackIndex) ?? clip.trackIndex })),
+    subtitles: (timeline.subtitles || []).map(subtitle => ({ ...subtitle, trackIndex: newIndexOf.get(subtitle.trackIndex) ?? subtitle.trackIndex })),
+  }))
+}
+
 export function deleteTrack(state: EditorState, trackId: string): EditorState {
   const tracks = selectTracks(state)
   const trackIndex = tracks.findIndex(track => track.id === trackId)

@@ -78,6 +78,13 @@ export const DEFAULT_TEXT_FADE = 0.5
  *  onto every logo is busywork. */
 export const DEFAULT_LAYER_FADE = 0.5
 
+/** The fade a layer gets when it hasn't set one. Only graphics (images) fade by
+ *  default; a video clip on an upper track is footage, and a silent half-second
+ *  fade from black on every one of them is never what was asked for. */
+export function defaultLayerFade(type: string | undefined): number {
+  return type === 'image' ? DEFAULT_LAYER_FADE : 0
+}
+
 /**
  * Opacity multiplier (0..1) for a text overlay's fade in/out at absolute time
  * `time`. Fades default to DEFAULT_TEXT_FADE when unset and are each capped at
@@ -121,12 +128,13 @@ export function linearKeyframeValue(keys: { t: number; value: number }[], t: num
  * this in the layer's alpha.
  */
 export function layerFadeMultiplier(
-  clip: { duration: number; fadeIn?: number; fadeOut?: number },
+  clip: { type?: string; duration: number; fadeIn?: number; fadeOut?: number },
   timeInClip: number,
 ): number {
   const half = clip.duration / 2
-  const fin = Math.min(clip.fadeIn ?? DEFAULT_LAYER_FADE, half)
-  const fout = Math.min(clip.fadeOut ?? DEFAULT_LAYER_FADE, half)
+  const dflt = defaultLayerFade(clip.type)
+  const fin = Math.min(clip.fadeIn ?? dflt, half)
+  const fout = Math.min(clip.fadeOut ?? dflt, half)
   let g = 1
   if (fin > 0 && timeInClip < fin) g = Math.max(0, Math.min(1, timeInClip / fin))
   if (fout > 0 && timeInClip > clip.duration - fout) {

@@ -15,6 +15,7 @@ import {
 } from './editor-selectors'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { getShortcutLabel } from './video-editor-utils'
+import { useColorMatte } from './useColorMatte'
 
 export interface MenuDepsParams {
   kbLayout: KeyboardLayout
@@ -34,6 +35,7 @@ export interface MenuDepsParams {
 
 export function useBuildMenuDefinitions(p: MenuDepsParams): MenuDefinition[] {
   const actions = useEditorActions()
+  const { addColorMatte } = useColorMatte()
   const menuState = useEditorStore(selectMenuState, shallow)
   const canUseClipboard = useEditorStore(selectCanUseClipboard)
   const canUndo = useEditorStore(selectCanUndo)
@@ -191,6 +193,7 @@ export function useBuildMenuDefinitions(p: MenuDepsParams): MenuDefinition[] {
         { id: 'add-subtitle-track', label: 'Add Subtitle Track', action: () => actions.addSubtitleTrack() },
         { id: 'sep-1', label: '', separator: true },
         { id: 'add-adjustment', label: 'Add Adjustment Layer', action: () => actions.createAdjustmentLayerAsset() },
+        { id: 'add-color-matte', label: 'Add Color Matte', action: () => { void addColorMatte() } },
         { id: 'sep-2', label: '', separator: true },
         { id: 'add-text', label: 'Add Text Overlay', action: () => actions.addTextClip() },
         { id: 'add-text-lower', label: 'Add Lower Third', action: () => actions.addTextClip({ style: TEXT_PRESETS.find(pr => pr.id === 'lower-third-basic')?.style }) },
@@ -247,6 +250,7 @@ export function useBuildMenuDefinitions(p: MenuDepsParams): MenuDefinition[] {
     },
   ]), [
     actions,
+    addColorMatte,
     canInsertEdit,
     canOverwriteEdit,
     canUseClipboard,

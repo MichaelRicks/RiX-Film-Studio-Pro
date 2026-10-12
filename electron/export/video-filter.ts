@@ -1,5 +1,5 @@
 import {
-  buildDissolveTimeRemap, DEFAULT_LAYER_FADE, findDissolveBoundaries,
+  buildDissolveTimeRemap, defaultLayerFade, findDissolveBoundaries,
   type ColorCorrection, type FlatSegment, type OverlayLayer,
 } from './timeline'
 import { ffmpegFilmLookChain, type ClipFilmLook } from '../../shared/film-looks'
@@ -479,8 +479,8 @@ function buildOverlayLayers(
     // reaches full opacity.
     const okeys = ly.opacityKeyframes && ly.opacityKeyframes.length > 0 ? ly.opacityKeyframes : null
     const half = dur / 2
-    const fadeIn = Math.min(ly.fadeIn ?? DEFAULT_LAYER_FADE, half)
-    const fadeOut = Math.min(ly.fadeOut ?? DEFAULT_LAYER_FADE, half)
+    const fadeIn = Math.min(ly.fadeIn ?? defaultLayerFade(ly.type), half)
+    const fadeOut = Math.min(ly.fadeOut ?? defaultLayerFade(ly.type), half)
     const opacityAt = (programT: number): number => {
       const l = programT - startAt
       let g = 1
