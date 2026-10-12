@@ -916,7 +916,10 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
             const remainingInCurrent = (activeVideoContributor.clip.startTime + activeVideoContributor.clip.duration) - atTime
             if (remainingInCurrent < VIDEO_POOL_PREROLL_SECONDS && remainingInCurrent > 0) {
               const nextSrc = resolveClipPathRef(nextClip)
-              const nextVideo = nextSrc ? ensurePoolVideo(nextSrc) : null
+              // The pool is keyed by file, so a next clip cut from the same file
+              // is this very element: seeking it now would yank the playing clip
+              // back to the next clip's start for its last 1.5s.
+              const nextVideo = nextSrc && nextSrc !== clipPath ? ensurePoolVideo(nextSrc) : null
               if (nextVideo && nextVideo.readyState >= 1) {
                 const nextTargetTime = nextClip.reversed
                   ? nextClip.trimStart + (nextVideo.duration || 0) - nextClip.trimStart - nextClip.trimEnd

@@ -736,6 +736,26 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     })
   }, [setClips])
 
+  // A seam picked by clicking its transition: Delete / Backspace removes it.
+  const [selectedSeam, setSelectedSeam] = useState<{ leftClipId: string; rightClipId: string } | null>(null)
+  useEffect(() => {
+    if (!selectedSeam) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      e.preventDefault()
+      e.stopPropagation()
+      removeCrossDissolve(selectedSeam.leftClipId, selectedSeam.rightClipId)
+      setSelectedSeam(null)
+    }
+    // Capture phase, so the clip-delete shortcut doesn't also fire.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [selectedSeam, removeCrossDissolve])
+  // Picking any clip drops the seam selection.
+  useEffect(() => { setSelectedSeam(null) }, [selectedClipIds])
+
   // Strip fades and transitions (dissolves, fade from/to black, audio fades) from
   // every clip on a track that starts at or after `fromTime`. `keepInId` keeps that
   // clip's own fade-in: from a cut, the left clip's start belongs to the cut before.
@@ -3276,7 +3296,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           }}
                         >
                           <button
-                            className="pointer-events-auto absolute top-0.5 left-0.5 h-3.5 w-3.5 rounded bg-black/60 text-[10px] leading-none text-red-300 hover:bg-red-800"
+                            className="pointer-events-auto absolute top-0.5 left-5 z-30 h-3.5 w-3.5 rounded bg-black/60 text-[10px] leading-none text-red-300 hover:bg-red-800"
                             title="Remove this transition"
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => { e.stopPropagation(); removeClipTransition(clip.id, 'in') }}
@@ -3293,7 +3313,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           }}
                         >
                           <button
-                            className="pointer-events-auto absolute top-0.5 right-0.5 h-3.5 w-3.5 rounded bg-black/60 text-[10px] leading-none text-red-300 hover:bg-red-800"
+                            className="pointer-events-auto absolute top-0.5 right-5 z-30 h-3.5 w-3.5 rounded bg-black/60 text-[10px] leading-none text-red-300 hover:bg-red-800"
                             title="Remove this transition"
                             onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => { e.stopPropagation(); removeClipTransition(clip.id, 'out') }}
@@ -3624,6 +3644,8 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           width: `${halfPx * 2}px`,
                           height: `${48 + 24}px`, /* extend upward to include popup zone */
                         }}
+                        onMouseDown={(e) => { if (cp.hasTransition) e.stopPropagation() }}
+                        onClick={() => { if (cp.hasTransition) setSelectedSeam({ leftClipId: cp.leftClip.id, rightClipId: cp.rightClip.id }) }}
                         onMouseEnter={() => setHoveredCutPoint({
                           leftClipId: cp.leftClip.id,
                           rightClipId: cp.rightClip.id,
@@ -3675,6 +3697,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                                 background: cp.isAudio
                                   ? 'linear-gradient(to right, rgba(52,211,153,0.12), rgba(52,211,153,0.28), rgba(52,211,153,0.12))'
                                   : `linear-gradient(to right, rgba(${tRGB},0.15), rgba(${tRGB},0.3), rgba(${tRGB},0.15))`,
+                                outline: selectedSeam?.leftClipId === cp.leftClip.id && selectedSeam?.rightClipId === cp.rightClip.id ? '2px solid rgb(250,204,21)' : undefined,
                                 borderTop: `2px solid ${cp.isAudio ? 'rgba(52,211,153,0.5)' : `rgba(${tRGB},0.5)`}`,
                                 borderBottom: `2px solid ${cp.isAudio ? 'rgba(52,211,153,0.5)' : `rgba(${tRGB},0.5)`}`,
                               }}

@@ -99,7 +99,14 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
 
   const [propertiesTab, setPropertiesTab] = useState<'properties' | 'metadata'>('properties')
   const [showFlip, setShowFlip] = useState(false)
-  const [showTransitions, setShowTransitions] = useState(false)
+  // Remembered across clips and sessions: once opened it stays open.
+  const [showTransitions, setShowTransitionsState] = useState(() => {
+    try { return localStorage.getItem('rix.props.showTransitions') === '1' } catch { return false }
+  })
+  const setShowTransitions = (open: boolean) => {
+    setShowTransitionsState(open)
+    try { localStorage.setItem('rix.props.showTransitions', open ? '1' : '0') } catch { /* storage unavailable */ }
+  }
   const [showColorCorrection, setShowColorCorrection] = useState(false)
   const [showFilmLook, setShowFilmLook] = useState(true)
 

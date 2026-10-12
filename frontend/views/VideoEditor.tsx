@@ -891,7 +891,7 @@ function VideoEditorWithStore({
                   currentProjectId={currentProjectId}
                 />
               </Panel>
-              <Separator className="h-1 flex-shrink-0 cursor-row-resize bg-transparent hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors relative z-10" />
+              <Separator className="h-1.5 flex-shrink-0 cursor-row-resize bg-violet-500/20 hover:bg-violet-500/50 active:bg-violet-400/70 transition-colors relative z-10 after:absolute after:left-1/2 after:top-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-violet-300/60 hover:after:bg-violet-200 after:transition-colors after:h-[3px] after:w-14" />
               <Panel minSize={LAYOUT_LIMITS.assetsHeight.min} className="min-h-0">
                 <VideoEditorTimelineControlPanel
                   handleTimelineTabContextMenu={handleTimelineTabContextMenu}
@@ -899,7 +899,7 @@ function VideoEditorWithStore({
               </Panel>
             </Group>
           </Panel>
-          <Separator className="w-1 flex-shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors relative z-10" />
+          <Separator className="w-1.5 flex-shrink-0 cursor-col-resize bg-violet-500/20 hover:bg-violet-500/50 active:bg-violet-400/70 transition-colors relative z-10 after:absolute after:left-1/2 after:top-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-violet-300/60 hover:after:bg-violet-200 after:transition-colors after:w-[3px] after:h-14" />
           <Panel id="editor-main-panel" className="min-w-0">
       {/* Main Editor Area */}
       <div className="h-full min-w-0 flex flex-col overflow-hidden">
@@ -936,7 +936,7 @@ function VideoEditorWithStore({
                   />
                 </div>
               </Panel>
-              <Separator className="w-1.5 cursor-col-resize bg-transparent hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors relative z-10" />
+              <Separator className="w-1.5 cursor-col-resize bg-violet-500/20 hover:bg-violet-500/50 active:bg-violet-400/70 transition-colors relative z-10 after:absolute after:left-1/2 after:top-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-violet-300/60 hover:after:bg-violet-200 after:transition-colors after:w-[3px] after:h-14" />
               <Panel
                 id="editor-program-monitor-panel"
                 defaultSize={`${100 - sourceSplitPercent}%`}
@@ -963,7 +963,7 @@ function VideoEditorWithStore({
         )}
         </div>
         </Panel>
-        <Separator className="h-1 flex-shrink-0 cursor-row-resize bg-transparent hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors relative z-10" />
+        <Separator className="h-1.5 flex-shrink-0 cursor-row-resize bg-violet-500/20 hover:bg-violet-500/50 active:bg-violet-400/70 transition-colors relative z-10 after:absolute after:left-1/2 after:top-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-violet-300/60 hover:after:bg-violet-200 after:transition-colors after:h-[3px] after:w-14" />
         <Panel
           id="editor-timeline-panel"
           panelRef={timelinePanelResizeRef}
@@ -1022,7 +1022,7 @@ function VideoEditorWithStore({
           </Panel>
           {showPropertiesPanel && (
             <>
-              <Separator className="w-1 flex-shrink-0 cursor-col-resize bg-transparent hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors relative z-10" />
+              <Separator className="w-1.5 flex-shrink-0 cursor-col-resize bg-violet-500/20 hover:bg-violet-500/50 active:bg-violet-400/70 transition-colors relative z-10 after:absolute after:left-1/2 after:top-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-violet-300/60 hover:after:bg-violet-200 after:transition-colors after:w-[3px] after:h-14" />
               <Panel
                 id="editor-properties-panel"
                 panelRef={rightPanelResizeRef}
