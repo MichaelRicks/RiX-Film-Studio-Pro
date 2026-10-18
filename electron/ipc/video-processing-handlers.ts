@@ -50,8 +50,8 @@ export function registerVideoProcessingHandlers(): void {
 
   // "Continue as new shot" — extract the clip's last frame into Continuations to
   // seed an i2v continuation, and report the source dims/fps so the next gen matches.
-  handle('continuationExtractLastFrame', async ({ videoPath, seekTime }) => {
-    const dir = ensureLibFolder(CONTINUATIONS_FOLDER)
+  handle('continuationExtractLastFrame', async ({ videoPath, seekTime, folder }) => {
+    const dir = ensureLibFolder(folder || CONTINUATIONS_FOLDER)
     const framePath = path.join(dir, `continuation_frame_${stamp()}.png`)
     if (seekTime != null) {
       // Scrubbed "Continue from this frame": grab the exact frame (accurate seek).
@@ -67,8 +67,8 @@ export function registerVideoProcessingHandlers(): void {
 
   // Drop the duplicate lead frame from a freshly generated continuation and save
   // the clean clip into Continuations.
-  handle('continuationSaveTrimmed', async ({ videoPath, colorMatchReference }) => {
-    const dir = ensureLibFolder(CONTINUATIONS_FOLDER)
+  handle('continuationSaveTrimmed', async ({ videoPath, colorMatchReference, folder }) => {
+    const dir = ensureLibFolder(folder || CONTINUATIONS_FOLDER)
     const outPath = path.join(dir, `continuation_${stamp()}.mp4`)
     trimFirstFrameToFile({ videoPath, outputPath: outPath, colorMatchReferencePath: colorMatchReference })
     return { path: outPath }

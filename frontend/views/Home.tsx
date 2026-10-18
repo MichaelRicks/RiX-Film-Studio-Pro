@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { backupAllProjects } from '../lib/project-backup'
 import { RestoreBackupDialog, type RestoreBackupListing } from '../components/RestoreBackupDialog'
-import { Plus, Folder, MoreVertical, Trash2, Pencil, Upload, Copy, HardDriveDownload } from 'lucide-react'
+import { Plus, Folder, MoreVertical, Trash2, Pencil, Upload, Copy, HardDriveDownload, Image as ImageIcon } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import { useView } from '../contexts/ViewContext'
 import { RixLogo } from '../components/RixLogo'
@@ -22,12 +22,13 @@ function formatDate(timestamp: number): string {
   })
 }
 
-function ProjectCard({ project, onOpen, onDelete, onRename, onDuplicate }: {
+function ProjectCard({ project, onOpen, onDelete, onRename, onDuplicate, onChooseThumbnail }: {
   project: Project
   onOpen: () => void
   onDelete: () => void
   onRename: () => void
   onDuplicate: () => void
+  onChooseThumbnail: () => void
 }) {
   const [showMenu, setShowMenu] = useState(false)
   const [imgError, setImgError] = useState(false)
@@ -35,7 +36,8 @@ function ProjectCard({ project, onOpen, onDelete, onRename, onDuplicate }: {
   // Keep existing representative selection logic: prefer first image, else first asset.
   // Color mattes are solid fills, so they never make a useful cover.
   const coverable = project.assets.filter(a => !a.matteColor)
-  const representativeAsset = coverable.find(a => a.type === 'image') || coverable[0] || project.assets[0] || null
+  const pickedCover = project.coverAssetId ? coverable.find(a => a.id === project.coverAssetId) : undefined
+  const representativeAsset = pickedCover || coverable.find(a => a.type === 'image') || coverable[0] || project.assets[0] || null
   const representativeUrl = representativeAsset?.path ? pathToFileUrl(representativeAsset.path) : null
   const representativeBigThumbnailUrl = representativeAsset?.bigThumbnailPath
     ? pathToFileUrl(representativeAsset.bigThumbnailPath)
@@ -116,6 +118,13 @@ function ProjectCard({ project, onOpen, onDelete, onRename, onDuplicate }: {
             Rename
           </button>
           <button
+            onClick={() => { onChooseThumbnail(); setShowMenu(false) }}
+            className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700 flex items-center gap-2"
+          >
+            <ImageIcon className="h-4 w-4" />
+            Choose thumbnail
+          </button>
+          <button
             onClick={() => { onDuplicate(); setShowMenu(false) }}
             className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700 flex items-center gap-2"
           >
@@ -136,7 +145,8 @@ function ProjectCard({ project, onOpen, onDelete, onRename, onDuplicate }: {
 }
 
 export function Home() {
-  const { projectIds, getProject, createProject, importProject, restoreProject, duplicateProject, deleteProject, renameProject } = useProjects()
+  const { projectIds, getProject, createProject, importProject, restoreProject, duplicateProject, deleteProject, renameProject, setProjectCover } = useProjects()
+  const [coverPickerId, setCoverPickerId] = useState<string | null>(null)
   const { openProject } = useView()
   const { migrationStatus, migrateProjects } = useProjectReferencesMigration()
   const [isCreating, setIsCreating] = useState(false)
@@ -461,6 +471,7 @@ export function Home() {
                   }}
                   onRename={() => handleRenameProject(project.id, project.name)}
                   onDuplicate={() => duplicateProject(project.id)}
+                  onChooseThumbnail={() => setCoverPickerId(project.id)}
                 />
               ))}
             </div>
@@ -502,6 +513,57 @@ export function Home() {
         </div>
       )}
       
+      {/* Thumbnail picker */}
+      {coverPickerId && (() => {
+        const target = projects.find(p => p.id === coverPickerId)
+        if (!target) return null
+        const choices = target.assets.filter(a => (a.type === 'image' || a.type === 'video') && !a.matteColor)
+        const close = () => setCoverPickerId(null)
+        return (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={close}>
+            <div className="bg-zinc-900 rounded-xl p-6 w-full max-w-3xl max-h-[85vh] flex flex-col border border-zinc-800" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-xl font-semibold text-white mb-1">Choose thumbnail</h2>
+              <p className="text-sm text-zinc-500 mb-4 truncate">{target.name}</p>
+              {choices.length === 0 ? (
+                <p className="text-sm text-zinc-400 py-8 text-center">This project has no images or videos yet.</p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 overflow-auto pr-1">
+                  {choices.map(asset => {
+                    const thumb = asset.bigThumbnailPath || asset.smallThumbnailPath || (asset.type === 'image' ? asset.path : undefined)
+                    const selected = target.coverAssetId === asset.id
+                    return (
+                      <button
+                        key={asset.id}
+                        onClick={() => { setProjectCover(target.id, asset.id); close() }}
+                        title={asset.prompt}
+                        className={`aspect-video rounded-lg overflow-hidden bg-zinc-800 border-2 transition-colors ${selected ? 'border-blue-500' : 'border-transparent hover:border-zinc-600'}`}
+                      >
+                        {thumb ? (
+                          <img src={pathToFileUrl(thumb)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <video src={pathToFileUrl(asset.path)} className="w-full h-full object-cover" muted preload="metadata" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="flex gap-3 mt-6">
+                <Button variant="outline" onClick={close} className="flex-1 border-zinc-700">Cancel</Button>
+                <Button
+                  variant="outline"
+                  disabled={!target.coverAssetId}
+                  onClick={() => { setProjectCover(target.id, null); close() }}
+                  className="flex-1 border-zinc-700"
+                >
+                  Use automatic
+                </Button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Rename Modal */}
       {renamingId && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">

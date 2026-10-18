@@ -97,6 +97,19 @@ import { lastFrameFromDuration, retimeKeyframesForSettings, type DraggedFrame } 
 import { useVideoSaveMenu } from '../components/useVideoSaveMenu'
 import { useImageSaveMenu } from '../components/useImageSaveMenu'
 import { saveToStudioAssets, saveVideoFile, saveImageFile } from '../lib/video-save-actions'
+import { getStudioAssetsTarget } from '../lib/studio-assets-target'
+
+/** Real duration of a video file (seconds), or undefined if it can't be read. The
+ *  requested generation length is not it: a trimmed continuation is a frame short. */
+function probeVideoDuration(url: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video')
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => resolve(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : undefined)
+    v.onerror = () => resolve(undefined)
+    v.src = url
+  })
+}
 
 // Sentinel binFilter value meaning "show every asset" (vs. a real binId, or
 // null for the default untagged-only view).
@@ -1115,9 +1128,10 @@ function PromptBar({
   }
   
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isGenerating && canGenerate && !isEnhancingPrompt) {
+    // Enter inserts a newline (default); Shift+Enter generates, so a stray Enter can't start a render.
+    if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault()
-      onGenerate()
+      if (!isGenerating && canGenerate && !isEnhancingPrompt) onGenerate()
     }
   }
 
@@ -2069,6 +2083,9 @@ export function GenSpace() {
   // systematic darkening (see continuation-color-shift). Captured here rather than
   // read from inputImage at trim time, which the user may have cleared/changed.
   const continuationSeedRef = useRef<string | null>(null)
+  // Studio Assets folder open when "Continue" was clicked; the seed frame and the
+  // trimmed clip are saved there rather than into a separate Continuations folder.
+  const continuationFolderRef = useRef<string | undefined>(undefined)
   const previousTimelineSettingsRef = useRef({
     duration: settings.duration,
     fps: settings.fps,
@@ -2792,6 +2809,7 @@ export function GenSpace() {
             const trimmed = await window.electronAPI?.continuationSaveTrimmed({
               videoPath,
               colorMatchReference: continuationSeedRef.current ?? undefined,
+              folder: continuationFolderRef.current,
             })
             if (trimmed?.path) sourcePath = trimmed.path
           } catch (err) {
@@ -2800,6 +2818,9 @@ export function GenSpace() {
         }
         const copied = await addVisualAssetToProject(sourcePath, currentProjectId, 'video')
         if (!copied) throw new Error('Could not persist generated video to project storage')
+        // The timeline sizes a clip from asset.duration; for a trimmed continuation the
+        // requested length is a frame too long (and absent -> 5s), so use the file's own.
+        const measuredDuration = continuationRun ? await probeVideoDuration(pathToFileUrl(copied.path)) : undefined
         addAsset(currentProjectId, {
           type: 'video',
           path: copied.path,
@@ -2809,7 +2830,7 @@ export function GenSpace() {
           height: copied.height,
           prompt: usedPrompt,
           resolution: usedSettings.videoResolution,
-          duration: usedSettings.duration ?? undefined,
+          duration: measuredDuration ?? usedSettings.duration ?? undefined,
           renderMs,
           generationParams: {
             mode: genMode,
@@ -2873,7 +2894,7 @@ export function GenSpace() {
     const colorMatchReference = continuationSeedRef.current ?? undefined
     void (async () => {
       try {
-        await api.continuationSaveTrimmed({ videoPath: src, colorMatchReference })
+        await api.continuationSaveTrimmed({ videoPath: src, colorMatchReference, folder: continuationFolderRef.current })
       } catch (err) {
         logger.error(`Continuation trim/save failed: ${err}`)
       }
@@ -3942,7 +3963,9 @@ export function GenSpace() {
     const api = window.electronAPI
     if (!api) return
     try {
-      const res = await api.continuationExtractLastFrame({ videoPath: videoAsset.path, seekTime })
+      const folder = getStudioAssetsTarget()
+      const res = await api.continuationExtractLastFrame({ videoPath: videoAsset.path, seekTime, folder })
+      continuationFolderRef.current = folder
       setMode('video')
       setInputImage(res.framePath)
       continuationSeedRef.current = res.framePath

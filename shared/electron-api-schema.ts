@@ -548,7 +548,7 @@ export const electronAPISchemas = {
   continuationExtractLastFrame: {
     // seekTime present = "Continue from this frame" (enlarged-player scrub);
     // absent = the clip's last frame.
-    input: z.object({ videoPath: z.string(), seekTime: z.number().optional() }),
+    input: z.object({ videoPath: z.string(), seekTime: z.number().optional(), folder: z.string().optional() }),
     output: z.object({ framePath: z.string(), width: z.number(), height: z.number(), fps: z.number() }),
   },
   // Drop the duplicate lead frame from a freshly generated continuation and save
@@ -557,7 +557,7 @@ export const electronAPISchemas = {
     // colorMatchReference (the seed frame = the source clip's last frame) lets the
     // trim step neutralize the i2v VAE's systematic ~2-3/255 darkening of the
     // continuation, which otherwise compounds across chained continuations.
-    input: z.object({ videoPath: z.string(), colorMatchReference: z.string().optional() }),
+    input: z.object({ videoPath: z.string(), colorMatchReference: z.string().optional(), folder: z.string().optional() }),
     output: z.object({ path: z.string() }),
   },
   // Reframe: crop an image/video to a region (source pixels), optionally scaling

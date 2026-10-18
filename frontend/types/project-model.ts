@@ -437,6 +437,8 @@ export const projectV2Schema = z.object({
   assets: z.array(assetSchema),
   timelines: z.array(timelineSchema),
   activeTimelineId: z.string().optional(),
+  // Asset the user picked as the Home card's thumbnail; unset = automatic.
+  coverAssetId: z.string().optional(),
 })
 
 const assetV1Schema = assetSchema

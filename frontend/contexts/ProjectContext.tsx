@@ -23,6 +23,7 @@ interface ProjectContextType {
   duplicateProject: (id: string) => Project | null
   deleteProject: (id: string) => void
   renameProject: (id: string, name: string) => void
+  setProjectCover: (id: string, assetId: string | null) => void
   activateProject: (id: string) => void
   clearActiveProject: () => void
   reloadProjectIds: () => void
@@ -277,6 +278,14 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     }))
   }, [mutateProject])
 
+  const setProjectCover = useCallback((id: string, assetId: string | null) => {
+    mutateProject(id, project => ({
+      ...project,
+      coverAssetId: assetId ?? undefined,
+      updatedAt: Date.now(),
+    }))
+  }, [mutateProject])
+
   const addAsset = useCallback((projectId: string, assetData: Omit<Asset, 'id' | 'createdAt'>): Asset => {
     const newAsset: Asset = {
       ...assetData,
@@ -450,6 +459,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       restoreProject,
       deleteProject,
       renameProject,
+      setProjectCover,
       activateProject,
       clearActiveProject,
       reloadProjectIds,
