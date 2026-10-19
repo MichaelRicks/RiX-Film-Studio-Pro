@@ -30,6 +30,8 @@ import { useDevFlags } from '../contexts/DevFlagsContext'
 import { type IcLoraListItem } from '../hooks/use-catalog'
 import { useIcLoraLibrary } from '../hooks/use-ic-lora-library'
 import { useLoraLibrary } from '../hooks/use-lora-library'
+import { PromptWithClaudeModal } from '../components/PromptWithClaudeModal'
+import { registerGenerationPromptTarget } from '../lib/generation-prompt-bridge'
 import { usePromptEnhancerProvider, type EnhanceProvider } from '../hooks/use-prompt-enhancer-provider'
 import { useGlobalGenerationLock } from '../hooks/use-global-generation-lock'
 import type { ICLoraConditioningType } from '../components/ICLoraPanel'
@@ -813,6 +815,7 @@ function PromptBar({
   onEnhancePrompt,
   enhanceProvider,
   onEnhanceProviderChange,
+  onPromptWithClaude,
   canUndoPrompt,
   onUndoPrompt,
   canRedoPrompt,
@@ -893,6 +896,7 @@ function PromptBar({
   onEnhancePrompt?: () => void
   enhanceProvider?: 'local' | 'api'
   onEnhanceProviderChange?: (provider: 'local' | 'api') => void
+  onPromptWithClaude?: () => void
   canUndoPrompt?: boolean
   onUndoPrompt?: () => void
   canRedoPrompt?: boolean
@@ -1672,6 +1676,21 @@ function PromptBar({
           </>
         )}
         
+        {/* Prompt with Claude — hands the reference image + an idea to the user's own Claude app,
+            which writes a multi-shot prompt straight into the box (video mode only). */}
+        {onPromptWithClaude && (
+          <button
+            type="button"
+            onClick={onPromptWithClaude}
+            disabled={!!isEnhancingPrompt}
+            title="Have Claude write a multi-shot prompt from your image and idea"
+            className="flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-zinc-300 hover:bg-zinc-800 flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Prompt with Claude
+          </button>
+        )}
+
         {/* Catalog-aware prompt enhancer — video/multi-keyframe/IC-LoRA (local-generation-only)
             or image (generation/editing, any backend). Runs either the local Gemma text encoder
             or, if available, Gemini's hosted API. */}
@@ -3383,6 +3402,16 @@ export function GenSpace() {
     setPrompt(enhancedPrompt)
   }, [promptHistory, historyIndex])
 
+  // "Prompt with Claude": Claude's set_generation_prompt lands here, on the same undo/redo
+  // history as an Enhance result.
+  const [promptWithClaudeOpen, setPromptWithClaudeOpen] = useState(false)
+  const promptRef = useRef(prompt)
+  promptRef.current = prompt
+  useEffect(
+    () => registerGenerationPromptTarget(next => applyEnhanceResult(promptRef.current, next)),
+    [applyEnhanceResult],
+  )
+
   const runEnhance = useCallback(async (sourcePrompt: string) => {
     if (isEnhancingPrompt) return
     setIsEnhancingPrompt(true)
@@ -4735,6 +4764,14 @@ export function GenSpace() {
           })} />
         )}
 
+        {promptWithClaudeOpen && (
+          <PromptWithClaudeModal
+            imagePath={inputImage}
+            existingPrompt={prompt}
+            onClose={() => setPromptWithClaudeOpen(false)}
+          />
+        )}
+
         {/* Prompt bar */}
         <PromptBar
           mode={mode}
@@ -4755,6 +4792,7 @@ export function GenSpace() {
           onEnhancePrompt={handleEnhancePrompt}
           enhanceProvider={canToggleEnhanceProvider ? enhanceProvider : undefined}
           onEnhanceProviderChange={handleEnhanceProviderChange}
+          onPromptWithClaude={mode === 'video' ? () => setPromptWithClaudeOpen(true) : undefined}
           canUndoPrompt={canUndoPrompt}
           onUndoPrompt={handleUndoPrompt}
           canRedoPrompt={canRedoPrompt}

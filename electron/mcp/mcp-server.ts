@@ -10,6 +10,7 @@ import { listLibrary, ensureLibFolder } from '../ipc/library-handlers'
 import { exportTimelineNative, type ExportNativeInput } from '../export/export-handler'
 import { callEditor, registerEditorBridge } from './editor-bridge'
 import { handle } from '../ipc/typed-handle'
+import { getMainWindow } from '../window'
 import { claudeConnectStatus, connectClaude, disconnectClaude } from './claude-connect'
 import { analyzeAudio, probeMedia, sampleFrames, type Frame } from './media-tools'
 
@@ -97,6 +98,25 @@ const TOOLS: Tool[] = [
       let editor: unknown
       try { editor = await callEditor('status', {}, 5000) } catch (e) { editor = { error: (e as Error).message } }
       return text({ app: `RiX ${app.getVersion()}`, libraryRoot: listLibrary().root, editor })
+    },
+  },
+  {
+    name: 'set_generation_prompt',
+    description: 'Put a finished video-generation prompt into the prompt box on RiX\'s Generate screen, ready for the user to review and generate. '
+      + 'Used by the rix-prompt skill ("Prompt with Claude"). Replaces the box\'s text (the user can undo it). Does not start a generation.',
+    inputSchema: {
+      type: 'object',
+      properties: { prompt: { type: 'string', description: 'The complete prompt text, exactly as it should appear in the box' } },
+      required: ['prompt'],
+    },
+    run: async (args) => {
+      const prompt = str(args.prompt)
+      if (!prompt?.trim()) throw new Error('"prompt" is required')
+      const result = await callEditor('set_generation_prompt', { prompt }, 10000)
+      // Bring RiX forward so the user sees the prompt land in the box.
+      const win = getMainWindow()
+      if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus() }
+      return text(result)
     },
   },
   {

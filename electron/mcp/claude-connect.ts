@@ -11,22 +11,24 @@ import { logger } from '../logger'
  * login — RiX never touches Claude credentials) can drive the RiX editor:
  *   1. registers this install's MCP endpoint (url + bearer token) as a user-scope
  *      MCP server named "rix-editor" in Claude Code;
- *   2. installs the bundled rix-editor skill into ~/.claude/skills.
+ *   2. installs the bundled skills (rix-editor, rix-prompt) into ~/.claude/skills.
  * Only runs when the user clicks Connect. Everything it writes is listed in the UI.
  */
 
-const SKILL_NAME = 'rix-editor'
+// rix-editor: cutting/exporting in the Video Editor. rix-prompt: "Prompt with Claude" on Generate.
+const SKILL_NAMES = ['rix-editor', 'rix-prompt'] as const
+type SkillName = (typeof SKILL_NAMES)[number]
 // Dev builds register under their own name: they have a different token than an
 // installed build on the same machine, and sharing one name would make each
 // build's Connect overwrite the other's registration.
 const SERVER_NAME = isDev ? 'rix-editor-dev' : 'rix-editor'
 
 const claudeConfigPath = () => path.join(os.homedir(), '.claude.json')
-const skillDir = () => path.join(os.homedir(), '.claude', 'skills', SKILL_NAME)
-const skillPath = () => path.join(skillDir(), 'SKILL.md')
-const bundledSkillPath = () => (isDev
-  ? path.join(getCurrentDir(), 'resources', 'claude', SKILL_NAME, 'SKILL.md')
-  : path.join(process.resourcesPath, 'claude', SKILL_NAME, 'SKILL.md'))
+const skillDir = (name: SkillName) => path.join(os.homedir(), '.claude', 'skills', name)
+const skillPath = (name: SkillName) => path.join(skillDir(name), 'SKILL.md')
+const bundledSkillPath = (name: SkillName) => (isDev
+  ? path.join(getCurrentDir(), 'resources', 'claude', name, 'SKILL.md')
+  : path.join(process.resourcesPath, 'claude', name, 'SKILL.md'))
 
 const sha = (file: string): string | null => {
   try { return createHash('sha256').update(fs.readFileSync(file)).digest('hex') } catch { return null }
@@ -64,15 +66,14 @@ function readClaudeConfig(): Record<string, unknown> | null {
 export function claudeConnectStatus(endpoint: Endpoint) {
   const cfg = readClaudeConfig()
   const entry = (cfg?.mcpServers as Record<string, { url?: string; headers?: Record<string, string> }> | undefined)?.[SERVER_NAME]
-  const installed = sha(skillPath())
   return {
     /** Claude Code has been set up on this machine (CLI present, or it has written its config). */
     claudeFound: findClaudeCli() !== null || cfg !== null,
     /** Registered AND pointing at this install's current address + token. */
     mcpRegistered: !!entry && entry.url === endpointUrl(endpoint) && entry.headers?.Authorization === authHeader(endpoint),
-    skillInstalled: installed !== null,
-    /** The installed skill is byte-identical to the one this build ships. */
-    skillCurrent: installed !== null && installed === sha(bundledSkillPath()),
+    skillInstalled: SKILL_NAMES.every(n => sha(skillPath(n)) !== null),
+    /** Every installed skill is byte-identical to the one this build ships. */
+    skillCurrent: SKILL_NAMES.every(n => { const i = sha(skillPath(n)); return i !== null && i === sha(bundledSkillPath(n)) }),
   }
 }
 
@@ -100,17 +101,17 @@ function registerViaConfig(endpoint: Endpoint): void {
 
 /** Install (or, when asked, update) the bundled skill. A differing existing file is
  *  never silently replaced: it is kept unless `update`, and backed up when replaced. */
-function installSkill(update: boolean): 'installed' | 'updated' | 'kept' | 'current' {
-  const bundled = bundledSkillPath()
-  if (!fs.existsSync(bundled)) throw new Error('The RiX editing skill is missing from this build.')
-  const target = skillPath()
+function installSkill(name: SkillName, update: boolean): 'installed' | 'updated' | 'kept' | 'current' {
+  const bundled = bundledSkillPath(name)
+  if (!fs.existsSync(bundled)) throw new Error(`The ${name} skill is missing from this build.`)
+  const target = skillPath(name)
   const existing = sha(target)
   if (existing === sha(bundled)) return 'current'
   if (existing !== null && !update) return 'kept'
-  fs.mkdirSync(skillDir(), { recursive: true })
+  fs.mkdirSync(skillDir(name), { recursive: true })
   if (existing !== null) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    fs.copyFileSync(target, path.join(skillDir(), `SKILL.md.bak-${stamp}`))
+    fs.copyFileSync(target, path.join(skillDir(name), `SKILL.md.bak-${stamp}`))
   }
   fs.copyFileSync(bundled, target)
   return existing === null ? 'installed' : 'updated'
@@ -121,7 +122,9 @@ export function connectClaude(endpoint: Endpoint, opts: { updateSkill?: boolean 
   let via: 'cli' | 'config'
   if (cli && registerViaCli(cli, endpoint)) via = 'cli'
   else { registerViaConfig(endpoint); via = 'config' }
-  const skill = installSkill(opts.updateSkill === true)
+  const results = SKILL_NAMES.map(n => installSkill(n, opts.updateSkill === true))
+  // One summary value for the UI: anything installed/updated wins over kept/current.
+  const skill = (['updated', 'installed', 'kept', 'current'] as const).find(r => results.includes(r)) ?? 'current'
   logger.info(`[Connect Claude] registered via ${via}; skill ${skill}`)
   return { via, skill }
 }

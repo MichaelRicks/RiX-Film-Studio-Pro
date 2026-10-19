@@ -11,6 +11,7 @@ import type { Asset, TextOverlayStyle, TimelineClip, TransitionType } from '../.
 import { DEFAULT_TEXT_STYLE, transitionTypeValues } from '../../types/project-model'
 import { addGenericAssetToProject } from '../../lib/asset-copy'
 import { pathToFileUrl } from '../../lib/file-url'
+import { setGenerationPrompt } from '../../lib/generation-prompt-bridge'
 import type { EditorState } from './editor-state'
 import type { EditorStoreApi } from './editor-store'
 import * as actions from './editor-actions'
@@ -678,6 +679,7 @@ function revealSteps(results: Array<Record<string, unknown>>, finalClips: Timeli
 export async function handleMcpEditorRequest(tool: string, args: Record<string, unknown>): Promise<unknown> {
   switch (tool) {
     case 'status': return status()
+    case 'set_generation_prompt': return setGenerationPrompt(args.prompt)
     case 'list_project_assets': return listProjectAssets(args)
     case 'get_timeline': return getTimeline()
     case 'export_payload': return exportPayload()
