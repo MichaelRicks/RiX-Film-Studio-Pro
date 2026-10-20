@@ -23,10 +23,7 @@ import {
 } from './editor-selectors'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { FontPicker } from '../../components/FontPicker'
-import { FilmLookPicker } from './FilmLookPicker'
 import { MatteColorRow } from './MatteColorRow'
-import { FILM_LOOKS_BY_ID } from '../../../shared/film-looks'
-import { pathToFileUrl } from '../../lib/file-url'
 import { setOpacityPreview } from './text-opacity-preview'
 import { OpacityKeyframeRow } from './OpacityKeyframeRow'
 import { fontHasBold } from '../../../shared/font-catalog'
@@ -108,7 +105,6 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
     try { localStorage.setItem('rix.props.showTransitions', open ? '1' : '0') } catch { /* storage unavailable */ }
   }
   const [showColorCorrection, setShowColorCorrection] = useState(false)
-  const [showFilmLook, setShowFilmLook] = useState(true)
 
   const getClipDimensions = (clip: TimelineClip): { width: number; height: number } | null => {
     if (clip.type === 'audio') return null
@@ -137,17 +133,6 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
   const hasVisualTransformControls = selectedClip.type === 'video' || selectedClip.type === 'image'
   const hasTransitionControls = selectedClip.type === 'video' || selectedClip.type === 'image'
   const hasColorCorrectionControls = selectedClip.type === 'video' || selectedClip.type === 'image'
-
-  // The swatches grade the clip's own still, so the grid shows this shot in each
-  // look rather than a stock sample.
-  const filmLookAsset = getLiveAsset(selectedClip)
-  const filmLookThumbnailPath = filmLookAsset?.smallThumbnailPath
-    ?? filmLookAsset?.bigThumbnailPath
-    ?? (selectedClip.type === 'image' ? filmLookAsset?.path : undefined)
-  const filmLookThumbnailUrl = filmLookThumbnailPath ? pathToFileUrl(filmLookThumbnailPath) : null
-  const activeFilmLookName = selectedClip.filmLook
-    ? FILM_LOOKS_BY_ID.get(selectedClip.filmLook.presetId)?.name ?? null
-    : null
 
   return (
     <div className="h-full w-full flex-shrink-0 border-l border-zinc-800 bg-zinc-900 p-4 overflow-auto">
@@ -1211,39 +1196,6 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
         )}
 
         {/* EFFECTS HIDDEN - Applied Effects section hidden because effects are not applied during export */}
-
-        {/* --- Film Look --- */}
-        {hasColorCorrectionControls && (
-          <div className="pt-3 border-t border-zinc-800">
-            <button
-              className="flex items-center gap-2 w-full text-left text-xs font-semibold text-zinc-400 hover:text-white transition-colors mb-2"
-              onClick={() => setShowFilmLook(!showFilmLook)}
-            >
-              {showFilmLook ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              <Film className="h-3.5 w-3.5" />
-              Film Look
-              {activeFilmLookName && (
-                <span className="ml-auto text-[10px] font-normal text-zinc-500 truncate max-w-[90px]">
-                  {activeFilmLookName}
-                </span>
-              )}
-            </button>
-            {showFilmLook && (
-              <FilmLookPicker
-                value={selectedClip.filmLook}
-                thumbnailUrl={filmLookThumbnailUrl}
-                onChange={(next) => updateClip(selectedClip.id, { filmLook: next })}
-                onApplyToAll={() => {
-                  const look = selectedClip.filmLook
-                  if (!look) return
-                  for (const c of clips) {
-                    if (c.type === 'video' || c.type === 'image') updateClip(c.id, { filmLook: { ...look } })
-                  }
-                }}
-              />
-            )}
-          </div>
-        )}
 
         {/* --- Color Correction --- */}
         {hasColorCorrectionControls && (

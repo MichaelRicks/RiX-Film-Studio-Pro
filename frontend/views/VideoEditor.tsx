@@ -49,6 +49,7 @@ import {
   selectTotalDuration,
 } from './editor/editor-selectors'
 import { VideoEditorAssetsPanel, type VideoEditorAssetsPanelHandle } from './editor/VideoEditorAssetsPanel'
+import { EditorLibraryPanel } from './editor/EditorLibraryPanel'
 import { VideoEditorTimelineControlPanel } from './editor/VideoEditorTimelineControlPanel'
 import { ClipPropertiesPanel } from './editor/ClipPropertiesPanel'
 import { SubtitlePropertiesPanel } from './editor/SubtitlePropertiesPanel'
@@ -887,18 +888,22 @@ function VideoEditorWithStore({
                 }}
                 className="min-h-0"
               >
-                <VideoEditorAssetsPanel
-                  ref={assetsPanelActionsRef}
-                  openSourceAsset={openSourceAsset}
-                  handleImportFile={handleImportFile}
-                  handleRegenerate={handleRegenerate}
-                  handleCancelRegeneration={handleCancelRegeneration}
-                  canCancelInFlight={regenCanCancel}
-                  isRegenerating={isRegenerating}
-                  regeneratingAssetId={regeneratingAssetId}
-                  regenProgress={regenProgress}
-                  regenStatusMessage={regenStatusMessage}
-                  currentProjectId={currentProjectId}
+                <EditorLibraryPanel
+                  assetsPanel={(
+                  <VideoEditorAssetsPanel
+                    ref={assetsPanelActionsRef}
+                    openSourceAsset={openSourceAsset}
+                    handleImportFile={handleImportFile}
+                    handleRegenerate={handleRegenerate}
+                    handleCancelRegeneration={handleCancelRegeneration}
+                    canCancelInFlight={regenCanCancel}
+                    isRegenerating={isRegenerating}
+                    regeneratingAssetId={regeneratingAssetId}
+                    regenProgress={regenProgress}
+                    regenStatusMessage={regenStatusMessage}
+                    currentProjectId={currentProjectId}
+                  />
+                  )}
                 />
               </Panel>
               <Separator className="h-1.5 flex-shrink-0 cursor-row-resize bg-violet-500/20 hover:bg-violet-500/50 active:bg-violet-400/70 transition-colors relative z-10 after:absolute after:left-1/2 after:top-1/2 after:-translate-x-1/2 after:-translate-y-1/2 after:rounded-full after:bg-violet-300/60 hover:after:bg-violet-200 after:transition-colors after:h-[3px] after:w-14" />

@@ -1,5 +1,5 @@
 /**
- * The film-look grid for the clip properties panel.
+ * The film-look grid for the FILTERS panel.
  *
  * Each swatch is the clip's OWN frame with that look applied — the same SVG
  * filter the program monitor uses, so the grid is a true preview of the grade
@@ -76,7 +76,7 @@ export function FilmLookPicker({
         {FILM_LOOKS.map((look) => {
           const selected = activeId === look.id
           return (
-            <Tooltip key={look.id} content={look.blurb} side="left">
+            <Tooltip key={look.id} content={look.blurb} side="right">
               <button
                 onClick={() => onChange({ presetId: look.id, intensity: value?.intensity ?? DEFAULT_INTENSITY })}
                 className={`relative aspect-video w-full rounded overflow-hidden border transition-colors ${

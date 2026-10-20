@@ -1241,6 +1241,12 @@ export function updateClip(state: EditorState, clipId: string, patch: Partial<Ti
   return mapClips(state, clip => (clip.id === clipId ? { ...clip, ...patch } : clip))
 }
 
+/** Sets (or clears) the film look on several clips as one change, so it is one undo step. */
+export function setClipsFilmLook(state: EditorState, clipIds: string[], filmLook: TimelineClip['filmLook']): EditorState {
+  const ids = new Set(clipIds)
+  return mapClips(state, clip => (ids.has(clip.id) ? { ...clip, filmLook } : clip))
+}
+
 export function setClipStartTime(state: EditorState, clipId: string, startTime: number): EditorState {
   return updateClip(state, clipId, { startTime: Math.max(0, startTime) })
 }
