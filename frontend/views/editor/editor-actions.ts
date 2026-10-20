@@ -2824,6 +2824,35 @@ export function applyGeneratedTake(state: EditorState, assetId: string, take: As
   }))
 }
 
+/** A regeneration lands as its own asset: the old one is left as it was (so it stays in the
+ *  library and in GenSpace) and the regenerated clip, with any linked clips on the same asset,
+ *  is pointed at the new one. Without `clipId` (regenerating from the Assets panel) the new
+ *  asset is only added. */
+export function applyRegeneratedAsset(state: EditorState, asset: Asset, clipId?: string): EditorState {
+  let next = addAssetToEditor(state, asset)
+  if (clipId) {
+    const clip = selectActiveTimeline(next)?.clips.find(c => c.id === clipId)
+    const oldAssetId = clip?.assetId
+    if (clip && oldAssetId) {
+      const group = new Set([clip.id, ...(clip.linkedClipIds ?? [])])
+      next = mapClips(next, c => (
+        group.has(c.id) && c.assetId === oldAssetId
+          ? { ...c, assetId: asset.id, asset: c.asset ? asset : c.asset, takeIndex: undefined, isRegenerating: false }
+          : c
+      ))
+    }
+    next = updateClip(next, clipId, { isRegenerating: false })
+  }
+  return updateSession(next, session => ({
+    ...session,
+    regeneration: {
+      regeneratingAssetId: null,
+      regeneratingClipId: null,
+      preError: null,
+    },
+  }))
+}
+
 export function clearRegenerationError(state: EditorState): EditorState {
   return updateSession(state, session => ({
     ...session,

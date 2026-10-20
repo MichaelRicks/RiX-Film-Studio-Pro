@@ -62,6 +62,10 @@ import { VideoEditorTimelineEditingPanel } from './editor/VideoEditorTimelineEdi
 import { VideoEditorLayoutMenu } from './editor/VideoEditorLayoutMenu'
 import { useEditorKeyboard } from './editor/useEditorKeyboard'
 import { useRegeneration } from './editor/useRegeneration'
+import { RegenerateShotDialog } from './editor/RegenerateShotDialog'
+import { QueuePanel } from './editor/QueuePanel'
+import { useVideoGenerationModelSpecs } from '../hooks/use-video-generation-model-specs'
+import { getVideoGenerationModelSpecs } from '../lib/video-generation-model-specs'
 import { useBuildMenuDefinitions } from './editor/buildMenuDefinitions'
 import { usePlaybackEngine } from './editor/usePlaybackEngine'
 import { usePlaybackAudioSync } from './editor/usePlaybackAudioSync'
@@ -599,6 +603,8 @@ function VideoEditorWithStore({
     regeneratingAssetId,
     handleRegenerate, handleCancelRegeneration,
     regenerationPreError, dismissRegenerationPreError,
+    regenDialog, closeRegenDialog, confirmRegenerate,
+    regenBusy, regeneratingLabel, regenQueue, removeFromRegenQueue, moveInRegenQueue, clearRegenQueue,
   } = useRegeneration({
     projectId: currentProjectId,
     regenGenerate, regenGenerateImage,
@@ -609,6 +615,10 @@ function VideoEditorWithStore({
     shouldVideoGenerateWithLtxApi,
   })
   const canUseIcLora = !forceApiGenerations
+  const { modelSpecs: regenModelSpecsResponse, errorMessage: regenModelSpecsError } = useVideoGenerationModelSpecs()
+  const regenVideoModelSpecs = getVideoGenerationModelSpecs(regenModelSpecsResponse, {
+    useApiSpecs: shouldVideoGenerateWithLtxApi,
+  })
   sourceDispatchRef.current = (action) => sourceMonitorActionsRef.current?.dispatchKeyboardAction(action)
   sourcePauseRef.current = () => sourceMonitorActionsRef.current?.pause()
   
@@ -1097,6 +1107,27 @@ function VideoEditorWithStore({
       {subtitleTrackStyleIdx !== null && (
         <SubtitleTrackStyleEditor />
       )}
+
+      {regenDialog && (
+        <RegenerateShotDialog
+          // Re-key on the clip so a second Regenerate click never shows the previous clip's text.
+          key={`${regenDialog.assetId}:${regenDialog.clipId ?? ''}`}
+          dialog={regenDialog}
+          videoModelSpecs={regenVideoModelSpecs}
+          videoSettingsMessage={regenModelSpecsError}
+          queueing={regenBusy}
+          onCancel={closeRegenDialog}
+          onConfirm={confirmRegenerate}
+        />
+      )}
+
+      <QueuePanel
+        runningLabel={regeneratingLabel}
+        queue={regenQueue}
+        onRemove={removeFromRegenQueue}
+        onMove={moveInRegenQueue}
+        onClear={clearRegenQueue}
+      />
 
       {(regenError || regenerationPreError) && (
         <GenerationErrorDialog

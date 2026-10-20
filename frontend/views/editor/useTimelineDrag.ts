@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Asset, TimelineClip, Track } from '../../types/project-model'
 import { resolveOverlaps, migrateClip, type ToolType } from './video-editor-utils'
 import { isDroppedMediaEvent, readDroppedMediaAsset } from './dropped-media-asset'
+import { resolveSnap, snapDropStart, type SnapLock } from './timeline-snap'
 
 interface DragPreviewPosition {
   startTime: number
@@ -153,6 +154,14 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
   const dragPreviewRef = useRef<Record<string, DragPreviewPosition> | null>(null)
   const dragPreviewNodesRef = useRef<Map<string, DragPreviewNode>>(new Map())
   const dragPreviewRafRef = useRef<number | null>(null)
+  // Snap lock carried between pointer moves so a snap holds, plus the time to draw its guide at.
+  const snapLockRef = useRef<SnapLock | null>(null)
+  const [snapGuideTime, setSnapGuideTime] = useState<number | null>(null)
+  const isDraggingOrResizing = !!draggingClip || !!resizingClip
+  useEffect(() => {
+    snapLockRef.current = null
+    setSnapGuideTime(null)
+  }, [isDraggingOrResizing])
 
   const clearDragPreviewDom = useCallback(() => {
     if (dragPreviewRafRef.current !== null) {
@@ -452,30 +461,26 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
     // Snap the primary clip (skip other clips in the drag group for snapping)
     const origPositions = draggingClip.originalPositions
     if (snapEnabled) {
-      const snapThreshold = 0.2
+      const targets: number[] = [0, currentTime]
       for (const otherClip of clips) {
-        if (origPositions[otherClip.id]) continue // skip clips in the drag group
-        
-        if (Math.abs(newStartTime - otherClip.startTime) < snapThreshold) {
-          newStartTime = otherClip.startTime
-        }
-        const otherEnd = otherClip.startTime + otherClip.duration
-        if (Math.abs(newStartTime - otherEnd) < snapThreshold) {
-          newStartTime = otherEnd
-        }
-        const clipEnd = newStartTime + primaryClip.duration
-        if (Math.abs(clipEnd - otherClip.startTime) < snapThreshold) {
-          newStartTime = otherClip.startTime - primaryClip.duration
-        }
+        if (origPositions[otherClip.id]) continue
+        targets.push(otherClip.startTime, otherClip.startTime + otherClip.duration)
       }
-      if (Math.abs(newStartTime - currentTime) < snapThreshold) {
-        newStartTime = currentTime
-      }
-      if (Math.abs(newStartTime + primaryClip.duration - currentTime) < snapThreshold) {
-        newStartTime = currentTime - primaryClip.duration
-      }
+      const snapped = resolveSnap({
+        start: newStartTime,
+        edgeOffsets: [0, primaryClip.duration],
+        targets,
+        pixelsPerSecond,
+        lock: snapLockRef.current,
+      })
+      newStartTime = snapped.start
+      snapLockRef.current = snapped.lock
+      setSnapGuideTime(snapped.lock ? snapped.lock.target : null)
+    } else if (snapLockRef.current) {
+      snapLockRef.current = null
+      setSnapGuideTime(null)
     }
-    
+
     // Use average track height for drag delta computation
     const avgTrackH = orderedTracks.length > 0
       ? orderedTracks.reduce((s, e) => s + (e.track.type === 'subtitle' ? subtitleTrackHeight : e.track.kind === 'audio' ? audioTrackHeight : videoTrackHeight), 0) / orderedTracks.length
@@ -827,28 +832,20 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
       }
       
       if (snapEnabled) {
-        const snapThreshold = 0.2
-        if (Math.abs(newStartTime - currentTime) < snapThreshold) {
-          const adjustment = currentTime - newStartTime
-          newStartTime = currentTime
-          newDuration -= adjustment
-        }
+        const targets: number[] = [0, currentTime]
         for (const otherClip of clips) {
           if (otherClip.id === clip.id) continue
-          const otherEnd = otherClip.startTime + otherClip.duration
-          if (Math.abs(newStartTime - otherEnd) < snapThreshold) {
-            const adjustment = otherEnd - newStartTime
-            newStartTime = otherEnd
-            newDuration -= adjustment
-          }
-          if (Math.abs(newStartTime - otherClip.startTime) < snapThreshold) {
-            const adjustment = otherClip.startTime - newStartTime
-            newStartTime = otherClip.startTime
-            newDuration -= adjustment
-          }
+          targets.push(otherClip.startTime, otherClip.startTime + otherClip.duration)
         }
+        const snapped = resolveSnap({
+          start: newStartTime, edgeOffsets: [0], targets, pixelsPerSecond, lock: snapLockRef.current,
+        })
+        newDuration -= snapped.start - newStartTime
+        newStartTime = snapped.start
+        snapLockRef.current = snapped.lock
+        setSnapGuideTime(snapped.lock ? snapped.lock.target : null)
       }
-      
+
       const newTrimStart = resizingClip.originalTrimStart + (newStartTime - resizingClip.originalStartTime)
       const maxDur = getMaxClipDuration({ ...clip, trimStart: Math.max(0, newTrimStart) })
       newDuration = Math.min(newDuration, maxDur)
@@ -873,24 +870,19 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
       newDuration = Math.max(0.5, newDuration)
       
       if (snapEnabled) {
-        const snapThreshold = 0.2
-        const newEndTime = clip.startTime + newDuration
-        
-        if (Math.abs(newEndTime - currentTime) < snapThreshold) {
-          newDuration = currentTime - clip.startTime
-        }
+        const targets: number[] = [currentTime]
         for (const otherClip of clips) {
           if (otherClip.id === clip.id) continue
-          if (Math.abs(newEndTime - otherClip.startTime) < snapThreshold) {
-            newDuration = otherClip.startTime - clip.startTime
-          }
-          const otherEnd = otherClip.startTime + otherClip.duration
-          if (Math.abs(newEndTime - otherEnd) < snapThreshold) {
-            newDuration = otherEnd - clip.startTime
-          }
+          targets.push(otherClip.startTime, otherClip.startTime + otherClip.duration)
         }
+        const snapped = resolveSnap({
+          start: clip.startTime + newDuration, edgeOffsets: [0], targets, pixelsPerSecond, lock: snapLockRef.current,
+        })
+        newDuration = snapped.start - clip.startTime
+        snapLockRef.current = snapped.lock
+        setSnapGuideTime(snapped.lock ? snapped.lock.target : null)
       }
-      
+
       const maxDur = getMaxClipDuration(clip)
       newDuration = Math.min(newDuration, maxDur)
       
@@ -1065,6 +1057,14 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
     }
   }, [slipSlideClip, handleSlipSlideMove, handleSlipSlideUp])
   
+  // Dropped clips attach to the clip behind them on the same track when close (gap-free by
+  // default); drop further away and they stay put. The Snapping toggle turns the magnet off.
+  const dropStart = (rawStart: number, trackIndex: number, duration?: number) => (
+    snapEnabled
+      ? snapDropStart({ rawStart, duration, trackIndex, clips, pixelsPerSecond })
+      : Math.max(0, rawStart)
+  )
+
   const handleTrackDrop = (e: React.DragEvent, trackIndex: number) => {
     e.preventDefault()
 
@@ -1075,7 +1075,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
       const rect = trackContainerRef.current.getBoundingClientRect()
       const scrollLeft = trackContainerRef.current.scrollLeft
       const x = e.clientX - rect.left + scrollLeft
-      const startTime = Math.max(0, x / pixelsPerSecond)
+      const startTime = dropStart(x / pixelsPerSecond, trackIndex)
       void readDroppedMediaAsset(e, currentProjectId).then((asset) => {
         if (!asset) return
         addAssetToEditor(asset)
@@ -1125,7 +1125,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
           const rect = trackContainerRef.current.getBoundingClientRect()
           const scrollLeft = trackContainerRef.current.scrollLeft
           const x = e.clientX - rect.left + scrollLeft
-          let nextStart = Math.max(0, x / pixelsPerSecond)
+          let nextStart = dropStart(x / pixelsPerSecond, trackIndex, droppedAssets[0].duration)
           for (const a of droppedAssets) {
             addClipToTimeline(a, trackIndex, nextStart)
             nextStart += a.duration || 5
@@ -1150,7 +1150,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
       const rect = trackContainerRef.current.getBoundingClientRect()
       const scrollLeft = trackContainerRef.current.scrollLeft
       const x = e.clientX - rect.left + scrollLeft
-      const startTime = Math.max(0, x / pixelsPerSecond)
+      const startTime = dropStart(x / pixelsPerSecond, trackIndex, asset.duration)
       addClipToTimeline(asset, trackIndex, startTime)
     }
   }
@@ -1174,5 +1174,6 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
     handleSlipSlideUp,
     handleTrackDrop,
     lassoOriginRef,
+    snapGuideTime,
   }
 }

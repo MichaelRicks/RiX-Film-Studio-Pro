@@ -157,7 +157,7 @@ export interface VideoEditorTimelineEditingPanelProps {
   onCreateVideoFromImage: (clip: TimelineClip) => void
   onCaptureFrameForVideo: (clip: TimelineClip) => void
   onCreateVideoFromAudio: (clip: TimelineClip) => void
-  handleRegenerate: (assetId: string, clipId: string) => void
+  handleRegenerate: (assetId: string, clipId: string, options?: { quick?: boolean }) => void
   handleRetakeClip: (clip: TimelineClip) => void
   handleCancelRegeneration: () => void
   canCancelInFlight: boolean
@@ -200,7 +200,6 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     handleRetakeClip,
     handleCancelRegeneration,
     canCancelInFlight,
-    isRegenerating,
     regenProgress,
   } = props
   const actions = useEditorActions()
@@ -1334,6 +1333,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     handleResizeStart,
     handleTrackDrop,
     lassoOriginRef,
+    snapGuideTime,
   } = useTimelineDrag({
     activeTool, setActiveTool, lastTrimTool, setLastTrimTool,
     pixelsPerSecond, totalDuration: timelineExtent,
@@ -1665,6 +1665,14 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     pendingZoomScrollRef.current = scrollTo
     setZoom(nextZoom)
   }, [clips, selectedClipIds, zoom, setZoom, getMinZoom])
+
+  // Zoom grips on the timeline scrollbar: keep `anchorTime` under the same screen x.
+  const handleScrollbarZoom = useCallback((nextPps: number, anchorTime: number, anchorViewX: number) => {
+    const nextZoom = clampZoom(nextPps / 100, getMinZoom())
+    if (Math.abs(nextZoom - zoom) < 1e-6) return
+    pendingZoomScrollRef.current = Math.max(0, anchorTime * nextZoom * 100 - anchorViewX)
+    setZoom(nextZoom)
+  }, [zoom, setZoom, getMinZoom])
 
   useEffect(() => {
     const scrollTo = pendingZoomScrollRef.current
@@ -2685,6 +2693,13 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                     />
                   )}
                   {/* Playhead is now rendered as overlay on the column wrapper (playheadOverlayRef) */}
+                  {/* Snap guide: shows where a dragged or trimmed edge has locked */}
+                  {snapGuideTime !== null && (
+                    <div
+                      className="absolute top-0 bottom-0 w-px bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.9)] z-[45] pointer-events-none"
+                      style={{ left: `${snapGuideTime * pixelsPerSecond}px` }}
+                    />
+                  )}
                   
                   {orderedTracks.map(({ track, realIndex, displayRow }) => (
                     <React.Fragment key={track.id}>
@@ -3236,10 +3251,10 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                                   </Tooltip>
                                 </>
                               )}
-                              <Tooltip content="Regenerate shot" side="top">
+                              <Tooltip content="Regenerate shot (Shift-click re-runs it as is)" side="top">
                                 <button
-                                  onClick={() => handleRegenerate(clip.assetId!, clip.id)}
-                                  disabled={isRegenerating}
+                                  onClick={(e) => handleRegenerate(clip.assetId!, clip.id, { quick: e.shiftKey })}
+                                  disabled={!!clip.isRegenerating}
                                   className={`p-0.5 rounded transition-colors ${
                                     clip.isRegenerating
                                       ? 'text-blue-400'
@@ -3836,7 +3851,12 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                   })}
                 </div>{/* close relative inner */}
               </div>{/* close trackContainerRef */}
-              <TimelineScrollbar containerRef={trackContainerRef} contentWidth={timelineExtent * pixelsPerSecond} />
+              <TimelineScrollbar
+                containerRef={trackContainerRef}
+                contentWidth={timelineExtent * pixelsPerSecond}
+                pixelsPerSecond={pixelsPerSecond}
+                onZoomPps={handleScrollbarZoom}
+              />
               </div>{/* close content column */}
             </div>{/* close scrollable area row */}
             </div>{/* close tracks body flex-col */}
@@ -4018,7 +4038,6 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
           setSelectedClipIds={setSelectedClipIds}
           currentTime={currentTime}
           hasClipboard={hasClipboard}
-          isRegenerating={isRegenerating}
           currentProjectId={currentProjectId}
           updateAsset={updateAsset}
           handleCopy={handleCopy}

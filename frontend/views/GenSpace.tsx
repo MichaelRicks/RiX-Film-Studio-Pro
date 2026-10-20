@@ -5,7 +5,7 @@ import {
   Heart, Film, Volume2, VolumeX, Sparkles, Sparkle,
   Clock, Monitor, ChevronUp, Scissors, Music, Undo2, Redo2, Loader2,
   ChevronLeft, ChevronRight, Copy, Check, Tag, Eraser, Square, MoveHorizontal, Wand2, Rows3, RefreshCw, Clapperboard,
-  CheckSquare, Lock, Dices, History, Shuffle, RectangleVertical,
+  CheckSquare, Lock, Dices, History, Shuffle, RectangleVertical, ListPlus,
 } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import type { GenSpaceRetakeSource } from '../contexts/ProjectContext'
@@ -37,6 +37,8 @@ import { useGlobalGenerationLock } from '../hooks/use-global-generation-lock'
 import type { ICLoraConditioningType } from '../components/ICLoraPanel'
 import type { Asset } from '../types/project-model'
 import { GenerationErrorDialog } from '../components/GenerationErrorDialog'
+import { QueuePanel } from './editor/QueuePanel'
+import { moveQueuedLaunch, removeQueuedLaunch, type QueuedLaunch } from '../lib/genspace-queue'
 import { addVisualAssetToProject } from '../lib/asset-copy'
 import { ReframeEditor, type ReframeRect, type ReframeKeyframe } from '../components/ReframeEditor'
 import { TrimStartBar } from '../components/TrimStartBar'
@@ -771,6 +773,7 @@ function PromptBar({
   onStop,
   isGenerating,
   isCancelling,
+  queueing = false,
   inputImage,
   onInputImageChange,
   inputLastImage,
@@ -838,6 +841,8 @@ function PromptBar({
   onStop?: () => void
   isGenerating: boolean
   isCancelling?: boolean
+  /** A job is running or waiting, so Generate adds this one to the queue instead of starting it. */
+  queueing?: boolean
   canGenerate: boolean
   buttonLabel: string
   buttonIcon: React.ReactNode
@@ -1136,7 +1141,7 @@ function PromptBar({
     // Enter inserts a newline (default); Shift+Enter generates, so a stray Enter can't start a render.
     if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault()
-      if (!isGenerating && canGenerate && !isEnhancingPrompt) onGenerate()
+      if (canGenerate && !isEnhancingPrompt) onGenerate()
     }
   }
 
@@ -1169,7 +1174,8 @@ function PromptBar({
 
   const showStop = Boolean(isGenerating && onStop)
   const stopDisabled = Boolean(isCancelling)
-  const generateDisabled = isGenerating || !canGenerate || isEnhancingPrompt
+  // Busy is not a reason to disable: a job started while another runs joins the queue.
+  const generateDisabled = !canGenerate || isEnhancingPrompt
 
   return (
     <div className="flex flex-col bg-zinc-900 border border-zinc-800 rounded-2xl overflow-visible">
@@ -1780,8 +1786,10 @@ function PromptBar({
             </>
           ) : (
             <>
-              <span className={isGenerating ? 'animate-pulse' : ''}>{buttonIcon}</span>
-              {buttonLabel}
+              {queueing
+                ? <ListPlus className="h-3.5 w-3.5" />
+                : <span className={isGenerating ? 'animate-pulse' : ''}>{buttonIcon}</span>}
+              {queueing ? 'Add to queue' : buttonLabel}
             </>
           )}
         </button>
@@ -2648,6 +2656,12 @@ export function GenSpace() {
     [activeProject?.assets],
   )
   const [lastPrompt, setLastPrompt] = useState('')
+  // Jobs waiting for the slot. In memory only: they are closures over this screen, so they
+  // are dropped if the user leaves the project.
+  const [genQueue, setGenQueue] = useState<QueuedLaunch[]>([])
+  const launchingRef = useRef(false)
+  const [dispatchTick, setDispatchTick] = useState(0)
+  const [activeJobLabel, setActiveJobLabel] = useState<string | null>(null)
 
   // On mount: recover any generation that was still running when the frontend reloaded.
   const currentProjectIdRef = useRef(currentProjectId)
@@ -3617,48 +3631,71 @@ export function GenSpace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // mount only
 
+  // Everything a job needs is read here, at the click, into `run`. If another job is
+  // running or waiting, `run` goes into the queue and starts when the slot is free, so a
+  // queued job never sees inputs changed after it was queued. `run` only starts the job;
+  // the completion effects tag the result from the submission refs it fills in.
+  const startOrQueue = async (label: string, run: () => Promise<void> | void) => {
+    const labelled = async () => {
+      setActiveJobLabel(label)
+      await run()
+    }
+    if (!generationBusy) {
+      await labelled()
+      return
+    }
+    setGenQueue(prev => [...prev, { id: `q-${Date.now().toString(36)}-${prev.length}`, label, run: labelled }])
+  }
+  const queueLabel = (kind: string, text: string) => {
+    const snippet = text.trim().replace(/\s+/g, ' ')
+    return snippet ? `${kind} · ${snippet.length > 48 ? `${snippet.slice(0, 48)}…` : snippet}` : kind
+  }
+
   const handleGenerate = async () => {
     if (mode === 'ic-lora') {
       if ((!prompt.trim() && !promptOptional) || !icLoraInput.videoPath || !icLoraInput.ready) return
+      const icVideoPath = icLoraInput.videoPath
 
       // Catalog IC-LoRA mode: the backend resolves catalog weights and builds the control
       // video from the user's input via the IC-LoRA's preprocessing pipeline.
       if (isCatalogIcLora && selectedIcLora) {
-        icLoraSubmissionRef.current = {
-          prompt,
-          input: {
-            videoPath: icLoraInput.videoPath,
+        await startOrQueue(queueLabel('IC-LoRA', prompt), async () => {
+          icLoraSubmissionRef.current = {
+            prompt,
+            input: {
+              videoPath: icVideoPath,
+              conditioningType: 'custom',
+              conditioningStrength: icLoraStrength,
+            },
+          }
+          await writeRecoveryContext({ prompt })
+          await submitIcLora({
+            videoPath: '',
             conditioningType: 'custom',
             conditioningStrength: icLoraStrength,
-          },
-        }
-        await writeRecoveryContext({ prompt })
-        await submitIcLora({
-          videoPath: '',
-          conditioningType: 'custom',
-          conditioningStrength: icLoraStrength,
-          prompt,
-          icLoraId: selectedIcLora.id,
-          variantId: selectedIcLoraVariantId ?? undefined,
-          inputPath: icLoraInput.videoPath,
-          controlValues,
-          outpaintPads: hasPositionCanvas ? outpaintPads : undefined,
-          allowEmptyPrompt: promptOptional,
-          referenceImagePath: icLoraInput.referenceImagePath ?? undefined,
-          // v1 backend reads the IC-LoRA's default_settings; overrides are sent only when the
-          // advanced flag is on. _resolve_settings applies skipStage2/resolutionFactor/audioMode/
-          // loraStrength server-side; fpsOverride is the exception — sent but ignored on the catalog path.
-          ...(advancedIcLoraControls
-            ? {
-                skipStage2: icLoraSkipStage2,
-                useLoraInStage2: icLoraUseLoraInStage2,
-                resolution: resolveResolution(icLoraResolutionOpts, icLoraResolutionKey),
-                resolutionFactor: icLoraResolutionFactor,
-                audioMode: icLoraAudioMode,
-                loraStrength: icLoraLoraStrength,
-                fpsOverride: icLoraFps ?? undefined,
-              }
-            : {}),
+            prompt,
+            icLoraId: selectedIcLora.id,
+            variantId: selectedIcLoraVariantId ?? undefined,
+            inputPath: icVideoPath,
+            controlValues,
+            outpaintPads: hasPositionCanvas ? outpaintPads : undefined,
+            allowEmptyPrompt: promptOptional,
+            referenceImagePath: icLoraInput.referenceImagePath ?? undefined,
+            // v1 backend reads the IC-LoRA's default_settings; overrides are sent only when the
+            // advanced flag is on. _resolve_settings applies skipStage2/resolutionFactor/audioMode/
+            // loraStrength server-side; fpsOverride is the exception — sent but ignored on the catalog path.
+            ...(advancedIcLoraControls
+              ? {
+                  skipStage2: icLoraSkipStage2,
+                  useLoraInStage2: icLoraUseLoraInStage2,
+                  resolution: resolveResolution(icLoraResolutionOpts, icLoraResolutionKey),
+                  resolutionFactor: icLoraResolutionFactor,
+                  audioMode: icLoraAudioMode,
+                  loraStrength: icLoraLoraStrength,
+                  fpsOverride: icLoraFps ?? undefined,
+                }
+              : {}),
+          })
         })
         return
       }
@@ -3668,91 +3705,96 @@ export function GenSpace() {
       const isCustomIcLora = icLoraCondType === 'custom'
       // Custom mode needs a selected IC-LoRA; the imported video is the control video.
       if (isCustomIcLora && !icLoraCustomRef) return
-      icLoraSubmissionRef.current = {
-        prompt,
-        input: {
-          videoPath: icLoraInput.videoPath,
+      await startOrQueue(queueLabel('IC-LoRA', prompt), async () => {
+        icLoraSubmissionRef.current = {
+          prompt,
+          input: {
+            videoPath: icVideoPath,
+            conditioningType: icLoraCondType,
+            conditioningStrength: icLoraStrength,
+            customLoraRef: isCustomIcLora ? icLoraCustomRef ?? undefined : undefined,
+          },
+        }
+        await writeRecoveryContext({ prompt })
+        await submitIcLora({
+          videoPath: icVideoPath,
           conditioningType: icLoraCondType,
           conditioningStrength: icLoraStrength,
+          prompt,
           customLoraRef: isCustomIcLora ? icLoraCustomRef ?? undefined : undefined,
-        },
-      }
-      await writeRecoveryContext({ prompt })
-      await submitIcLora({
-        videoPath: icLoraInput.videoPath,
-        conditioningType: icLoraCondType,
-        conditioningStrength: icLoraStrength,
-        prompt,
-        customLoraRef: isCustomIcLora ? icLoraCustomRef ?? undefined : undefined,
-        controlVideoPath: isCustomIcLora ? icLoraInput.videoPath : undefined,
-        skipStage2: icLoraSkipStage2,
-        useLoraInStage2: icLoraUseLoraInStage2,
-        resolution: resolveResolution(icLoraResolutionOpts, icLoraResolutionKey),
-        resolutionFactor: icLoraResolutionFactor,
-        audioMode: icLoraAudioMode,
-        loraStrength: icLoraLoraStrength,
-        fpsOverride: icLoraFps ?? undefined,
+          controlVideoPath: isCustomIcLora ? icVideoPath : undefined,
+          skipStage2: icLoraSkipStage2,
+          useLoraInStage2: icLoraUseLoraInStage2,
+          resolution: resolveResolution(icLoraResolutionOpts, icLoraResolutionKey),
+          resolutionFactor: icLoraResolutionFactor,
+          audioMode: icLoraAudioMode,
+          loraStrength: icLoraLoraStrength,
+          fpsOverride: icLoraFps ?? undefined,
+        })
       })
       return
     }
 
     if (mode === 'retake') {
       if (!retakeInput.videoPath || retakeInput.duration < 2) return
-      retakeSubmissionRef.current = {
-        prompt,
-        model: retakeModel,
-        input: {
-          videoPath: retakeInput.videoPath,
+      const retakeVideoPath = retakeInput.videoPath
+      await startOrQueue(queueLabel('Retake', prompt), async () => {
+        retakeSubmissionRef.current = {
+          prompt,
+          model: retakeModel,
+          input: {
+            videoPath: retakeVideoPath,
+            startTime: retakeInput.startTime,
+            duration: retakeInput.duration,
+            videoDuration: retakeInput.videoDuration,
+          },
+        }
+        await writeRecoveryContext({ prompt, model: retakeModel })
+        await submitRetake({
+          videoPath: retakeVideoPath,
           startTime: retakeInput.startTime,
           duration: retakeInput.duration,
-          videoDuration: retakeInput.videoDuration,
-        },
-      }
-      await writeRecoveryContext({ prompt, model: retakeModel })
-      await submitRetake({
-        videoPath: retakeInput.videoPath,
-        startTime: retakeInput.startTime,
-        duration: retakeInput.duration,
-        prompt,
-        mode: 'replace_audio_and_video',
-        resolution: resolveResolution(retakeResolutionOpts, retakeResolutionKey),
-        model: retakeModel,
+          prompt,
+          mode: 'replace_audio_and_video',
+          resolution: resolveResolution(retakeResolutionOpts, retakeResolutionKey),
+          model: retakeModel,
+        })
       })
       return
     }
 
     if (mode === 'extend') {
       if (!extendInput.videoPath || !extendInput.ready) return
-      extendSubmissionRef.current = {
-        prompt,
-        model: extendModel,
-        input: {
-          videoPath: extendInput.videoPath,
-          direction: extendDirection,
+      const extendVideoPath = extendInput.videoPath
+      await startOrQueue(queueLabel('Extend', prompt), async () => {
+        extendSubmissionRef.current = {
+          prompt,
+          model: extendModel,
+          input: {
+            videoPath: extendVideoPath,
+            direction: extendDirection,
+            duration: extendSeconds,
+            videoDuration: extendInput.videoDuration,
+          },
+        }
+        await writeRecoveryContext({ prompt, model: extendModel })
+        await submitExtend({
+          videoPath: extendVideoPath,
           duration: extendSeconds,
-          videoDuration: extendInput.videoDuration,
-        },
-      }
-      await writeRecoveryContext({ prompt, model: extendModel })
-      await submitExtend({
-        videoPath: extendInput.videoPath,
-        duration: extendSeconds,
-        prompt,
-        mode: extendDirection,
-        resolution: resolveResolution(extendResolutionOpts, extendResolutionKey),
-        model: extendModel,
+          prompt,
+          mode: extendDirection,
+          resolution: resolveResolution(extendResolutionOpts, extendResolutionKey),
+          model: extendModel,
+        })
       })
       return
     }
 
     if (!prompt.trim()) return
 
-    // Save the prompt before generation starts
-    setLastPrompt(prompt)
-
     if (mode === 'image') {
       const editSource = inputImage || null
-      lastImageEditRef.current = editSource
+      const editContext = editSource
         ? { source: editSource, strength: settings.imageEditStrength ?? 0.6 }
         : null
       const imageSettings: GenerationSettings = {
@@ -3772,23 +3814,28 @@ export function GenSpace() {
         imageVariation: settings.imageVariation,
       }
       const modelLabel = resolvePipelineDisplayName(videoModelSpecs, imageSettings.model) ?? undefined
-      generateSubmissionRef.current = {
-        kind: 'image',
-        prompt,
-        settings: imageSettings,
-        modelLabel,
-        inputImageUrl: editSource,
-        inputLastImageUrl: null,
-        inputAudioUrl: null,
-      }
-      await writeRecoveryContext({
-        prompt,
-        settings: imageSettings,
-        modelLabel,
-        genType: 'image',
-        inputImageUrl: editSource ?? undefined,
+      await startOrQueue(queueLabel(editSource ? 'Image edit' : 'Image', prompt), async () => {
+        // Save the prompt before generation starts
+        setLastPrompt(prompt)
+        lastImageEditRef.current = editContext
+        generateSubmissionRef.current = {
+          kind: 'image',
+          prompt,
+          settings: imageSettings,
+          modelLabel,
+          inputImageUrl: editSource,
+          inputLastImageUrl: null,
+          inputAudioUrl: null,
+        }
+        await writeRecoveryContext({
+          prompt,
+          settings: imageSettings,
+          modelLabel,
+          genType: 'image',
+          inputImageUrl: editSource ?? undefined,
+        })
+        generateImage(prompt, imageSettings, editSource)
       })
-      generateImage(prompt, imageSettings, editSource)
     } else {
       // Generate video (t2v if no image/audio, i2v if image, a2v if audio)
       const imagePath = mode === 'multi-keyframe' ? null : inputImage || null
@@ -3809,28 +3856,46 @@ export function GenSpace() {
             : undefined,
       }
       const modelLabel = resolvePipelineDisplayName(videoModelSpecs, genSettings.model) ?? undefined
-      generateSubmissionRef.current = {
-        kind: 'video',
-        prompt,
-        settings: genSettings,
-        modelLabel,
-        inputImageUrl: imagePath,
-        inputLastImageUrl: lastImagePath,
-        inputAudioUrl: audioPath,
-        keyframes: mode === 'multi-keyframe' ? keyframes : undefined,
+      // "Continue as new shot" arms these for the next Generate click. Take them now, so a
+      // job that is already running cannot consume them, and hand them to this job's run.
+      const continuation = {
+        pending: continuationPendingRef.current,
+        seed: continuationSeedRef.current,
+        folder: continuationFolderRef.current,
       }
-      await writeRecoveryContext({
-        prompt,
-        settings: genSettings,
-        modelLabel,
-        inputImageUrl: imagePath ?? undefined,
-        inputLastImageUrl: lastImagePath ?? undefined,
-        inputAudioUrl: audioPath ?? undefined,
-        keyframes: mode === 'multi-keyframe' ? toPersistedKeyframes(keyframes) : undefined,
+      continuationPendingRef.current = false
+      await startOrQueue(queueLabel(mode === 'multi-keyframe' ? 'Keyframes' : 'Video', prompt), async () => {
+        // Save the prompt before generation starts
+        setLastPrompt(prompt)
+        continuationPendingRef.current = continuation.pending
+        if (continuation.pending) {
+          continuationSeedRef.current = continuation.seed
+          continuationFolderRef.current = continuation.folder
+        }
+        generateSubmissionRef.current = {
+          kind: 'video',
+          prompt,
+          settings: genSettings,
+          modelLabel,
+          inputImageUrl: imagePath,
+          inputLastImageUrl: lastImagePath,
+          inputAudioUrl: audioPath,
+          keyframes: mode === 'multi-keyframe' ? keyframes : undefined,
+        }
+        await writeRecoveryContext({
+          prompt,
+          settings: genSettings,
+          modelLabel,
+          inputImageUrl: imagePath ?? undefined,
+          inputLastImageUrl: lastImagePath ?? undefined,
+          inputAudioUrl: audioPath ?? undefined,
+          keyframes: mode === 'multi-keyframe' ? toPersistedKeyframes(keyframes) : undefined,
+        })
+        generate(prompt, imagePath, genSettings, audioPath, lastImagePath, { mode, keyframes })
       })
-      generate(prompt, imagePath, genSettings, audioPath, lastImagePath, { mode, keyframes })
     }
   }
+
   
   // These asset-card handlers are memoized (stable identity) so the gallery grid
   // below can be memoized too — otherwise every prompt keystroke re-renders all
@@ -4098,7 +4163,9 @@ export function GenSpace() {
   // After a UI refresh those hooks remount at false; the same progress poll that disables
   // Generate (isOtherGenerationRunning) is the SSOT for "slot busy" / Stop.
   const slotBusyLocally = isGenerating || isRetaking || isExtending || isIcLoraGenerating
-  const canSubmit = !isOtherGenerationRunning && !slotBusyLocally && (isRetakeMode
+  // Whether the inputs are enough to start a job. Busy is separate: a job started while
+  // another runs (or waits) is queued, so it no longer blocks Generate.
+  const canSubmit = (isRetakeMode
     ? retakeInput.ready && !!retakeInput.videoPath
     : isExtendMode
       ? extendInput.ready && !!extendInput.videoPath
@@ -4108,6 +4175,7 @@ export function GenSpace() {
         : !!prompt.trim()
           && (mode !== 'multi-keyframe' || keyframes.length >= 1)
           && hasCompatibleVideoSettings)
+  const generationBusy = isOtherGenerationRunning || slotBusyLocally || genQueue.length > 0
   const promptButtonLabel = isRetakeMode ? 'Retake' : isExtendMode ? 'Extend' : isIcLoraMode ? 'Generate' : 'Generate'
   const promptButtonIcon = isRetakeMode
     ? <Scissors className="h-3.5 w-3.5" />
@@ -4117,6 +4185,28 @@ export function GenSpace() {
         ? <Sparkles className="h-3.5 w-3.5" />
     : <Sparkles className={`h-3.5 w-3.5 ${isGenerating ? 'animate-pulse' : ''}`} />
   const promptGenerating = isRetakeMode ? isRetaking : isExtendMode ? isExtending : isIcLoraMode ? isIcLoraGenerating : isGenerating
+
+  // Next job in line: starts once the slot is free, the last result has been saved, and no
+  // error is waiting to be read. Jobs wait in the order shown in the queue panel.
+  useEffect(() => {
+    if (genQueue.length === 0 || launchingRef.current) return
+    if (slotBusyLocally || isOtherGenerationRunning || isAnyLocalGenerationInFlight) return
+    if (error || localError) return
+    const [next, ...rest] = genQueue
+    launchingRef.current = true
+    setGenQueue(rest)
+    void Promise.resolve()
+      .then(() => next.run())
+      .catch(err => logger.error(`Queued generation failed to start: ${err}`))
+      .finally(() => {
+        launchingRef.current = false
+        setDispatchTick(t => t + 1)
+      })
+  }, [genQueue, dispatchTick, slotBusyLocally, isOtherGenerationRunning, isAnyLocalGenerationInFlight, error, localError])
+
+  useEffect(() => {
+    if (!slotBusyLocally && genQueue.length === 0) setActiveJobLabel(null)
+  }, [slotBusyLocally, genQueue.length])
   
   // Close size menu on click outside
   useEffect(() => {
@@ -4789,6 +4879,18 @@ export function GenSpace() {
           isGenerating={isGenerating}
         />
 
+        {/* Waiting jobs: one line above the prompt box, open it to reorder or remove. */}
+        <QueuePanel
+          inline
+          title="Generation queue"
+          runningLabel={slotBusyLocally ? activeJobLabel : null}
+          queue={genQueue}
+          footnote="Waiting jobs are dropped if you leave this project."
+          onRemove={id => setGenQueue(prev => removeQueuedLaunch(prev, id))}
+          onMove={(id, to) => setGenQueue(prev => moveQueuedLaunch(prev, id, to))}
+          onClear={() => setGenQueue([])}
+        />
+
         {/* Active IC-LoRA (IC-LoRA view only). */}
         {mode === 'ic-lora' && isCatalogIcLora && selectedIcLora && (
           <SelectedLoraInfo items={[{
@@ -4865,6 +4967,7 @@ export function GenSpace() {
           lastSeed={lastSeed}
           onGenerate={handleGenerate}
           isGenerating={promptGenerating}
+          queueing={generationBusy}
           canGenerate={canSubmit}
           buttonLabel={promptButtonLabel}
           buttonIcon={promptButtonIcon}

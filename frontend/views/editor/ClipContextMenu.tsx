@@ -25,7 +25,6 @@ export interface ClipContextMenuProps {
   setSelectedClipIds: React.Dispatch<React.SetStateAction<Set<string>>>
   currentTime: number
   hasClipboard: boolean
-  isRegenerating: boolean
   currentProjectId: string | null
   updateAsset: (projectId: string, assetId: string, updates: Partial<Asset>) => void
   handleCopy: () => void
@@ -108,7 +107,6 @@ export function ClipContextMenu({
   setSelectedClipIds,
   currentTime,
   hasClipboard,
-  isRegenerating,
   currentProjectId,
   updateAsset,
   handleCopy,
@@ -230,7 +228,6 @@ export function ClipContextMenu({
           })()}
           clips={clips}
           hasClipboard={hasClipboard}
-          isRegenerating={isRegenerating}
           currentProjectId={currentProjectId}
           updateAsset={updateAsset}
           handleCopy={handleCopy} handleCut={handleCut} handlePaste={handlePaste}
@@ -277,7 +274,6 @@ export function ClipContextMenu({
    ────────────────────────────────────────────── */
 function SingleClipMenu({
   contextClip, clips, hasClipboard,
-  isRegenerating,
   currentProjectId, updateAsset,
   handleCopy, handleCut, handlePaste, setClips,
   handleRegenerate, handleCancelRegeneration, canCancelInFlight,
@@ -295,7 +291,6 @@ function SingleClipMenu({
   contextClip: TimelineClip
   clips: TimelineClip[]
   hasClipboard: boolean
-  isRegenerating: boolean
   currentProjectId: string | null
   updateAsset: (projectId: string, assetId: string, updates: Partial<Asset>) => void
   handleCopy: () => void; handleCut: () => void; handlePaste: () => void
@@ -489,7 +484,7 @@ function SingleClipMenu({
             ) : null
           ) : (
             <MenuItem icon={RefreshCw} iconClass="text-blue-400" label="Regenerate Shot"
-              disabled={isRegenerating} onClick={() => { handleRegenerate(contextClip.assetId!, contextClip.id); close() }} />
+              onClick={() => { handleRegenerate(contextClip.assetId!, contextClip.id); close() }} />
           )}
 
           {/* Take navigation */}

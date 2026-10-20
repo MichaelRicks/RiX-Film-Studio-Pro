@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useRef } from 'react'
-import type { Asset, TimelineClip } from '../../types/project-model'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Asset, GenerationParams, TimelineClip } from '../../types/project-model'
 import type { GenerationSettings } from '../../components/SettingsPanel'
 import type { GenerationError } from '../../lib/generation-errors'
 import type { VideoGenerationPipeline } from '../../lib/video-generation-model-specs'
 import type { GenSpaceMode } from '../../lib/genspace-multi-keyframe'
 import { fromPersistedKeyframes, type KeyframeItem } from '../../lib/multi-keyframe'
 import { addVisualAssetToProject } from '../../lib/asset-copy'
+import { pathToFileUrl } from '../../lib/file-url'
+import { probeVideoDuration } from '../../lib/probe-video-duration'
 import { ApiClient } from '../../lib/api-client'
 import { logger } from '../../lib/logger'
+import { enqueueRegen, makeRegenJob, moveRegen, removeRegen, type RegenJob } from './regen-queue'
 import {
   selectAssets,
   selectClips,
@@ -77,6 +80,49 @@ function resolveAssetPreviewPath(assets: Asset[], clips: TimelineClip[], asset: 
   return asset.path
 }
 
+/** What the Regenerate dialog is showing. `params` is null while a prompt is still being worked out. */
+export interface RegenDialogState {
+  assetId: string
+  clipId?: string
+  assetName: string
+  assetType: Asset['type']
+  thumbnailPath?: string
+  /** True when the asset has no stored generation settings and the prompt was written for it. */
+  promptSuggested: boolean
+  suggesting: boolean
+  params: GenerationParams | null
+}
+
+function assetFileName(asset: Asset): string {
+  return (asset.path || '').split(/[\\/]/).pop() || 'Shot'
+}
+
+function jobLabel(asset: Asset, prompt: string): string {
+  const name = assetFileName(asset)
+  const snippet = prompt.trim().replace(/\s+/g, ' ')
+  return snippet ? `${name} · ${snippet.length > 48 ? `${snippet.slice(0, 48)}…` : snippet}` : name
+}
+
+/** Settings to start from for an asset that has no generation record (imported footage). */
+function defaultParamsFor(asset: Asset, prompt: string): GenerationParams {
+  const isImage = asset.type === 'image'
+  return {
+    mode: isImage ? 'text-to-image' : 'text-to-video',
+    prompt,
+    model: 'fast',
+    duration: isImage ? null : (asset.duration || 5),
+    resolution: isImage ? normalizeImageResolution(asset.resolution) : normalizeVideoResolution(asset.resolution),
+    fps: 24,
+    audio: false,
+    cameraMotion: 'none',
+  }
+}
+
+export interface RegenerateOptions {
+  /** Skip the dialog and re-run the stored settings as they are. */
+  quick?: boolean
+}
+
 export interface UseRegenerationParams {
   projectId: string
   // Generation hook values
@@ -114,12 +160,11 @@ export function useRegeneration(params: UseRegenerationParams) {
     shouldVideoGenerateWithLtxApi,
   } = params
   const {
-    applyGeneratedTake,
+    applyRegeneratedAsset,
     cancelClipRegeneration,
     failClipRegeneration,
     setRegenerationPreError,
     startClipRegeneration,
-    updateAsset,
   } = useEditorActions()
   const assets = useEditorStore(selectAssets)
   const clips = useEditorStore(selectClips)
@@ -127,70 +172,67 @@ export function useRegeneration(params: UseRegenerationParams) {
   const regeneratingClipId = useEditorStore(selectRegeneratingClipId)
   const regenerationPreError = useEditorStore(selectRegenerationPreError)
   const cancelRequestedRef = useRef(false)
+  // What the running job was started with; the finished video becomes an asset described by it.
+  const regenJobRef = useRef<GenerationParams | null>(null)
 
   const dismissRegenerationPreError = useCallback(() => {
     setRegenerationPreError(null)
   }, [setRegenerationPreError])
 
-  const handleRegenerate = useCallback(async (assetId: string, clipId?: string) => {
+  const [regenDialog, setRegenDialog] = useState<RegenDialogState | null>(null)
+  const [regenQueue, setRegenQueue] = useState<RegenJob[]>([])
+  // True while a shot is rendering or others are waiting: new requests join the line.
+  const busy = isRegenerating || !!regeneratingAssetId || regenQueue.length > 0
+
+  // For an asset with no generation record, look at its first frame and have the
+  // prompt helper describe it. Null when that is not possible.
+  const suggestParams = useCallback(async (asset: Asset, clipId?: string): Promise<GenerationParams | null> => {
+    try {
+      const clipPath = resolveAssetPreviewPath(assets, clips, asset, clipId)
+      let framePath = ''
+
+      if (asset.type === 'video' && clipPath) {
+        const frame = await window.electronAPI.extractVideoFrame({
+          videoPath: clipPath,
+          seekTime: 0.1,
+          width: 512,
+          quality: 3,
+        })
+        framePath = frame.path
+      } else if (asset.type === 'image' && clipPath) {
+        framePath = clipPath
+      }
+      if (!framePath) return null
+
+      const result = await ApiClient.suggestGapPrompt({
+        gapDuration: asset.duration || 5,
+        mode: asset.type === 'image' ? 'text-to-image' : 'text-to-video',
+        beforePrompt: '',
+        afterPrompt: '',
+        beforeFrame: framePath,
+        afterFrame: '',
+      })
+      if (!result.ok) throw new Error(result.error.message)
+
+      const suggestedPrompt = result.data.suggested_prompt
+      return suggestedPrompt ? defaultParamsFor(asset, suggestedPrompt) : null
+    } catch (error) {
+      logger.warn(`Failed to auto-generate prompt for imported asset: ${error}`)
+      return null
+    }
+  }, [assets, clips])
+
+  // `override` is what the Regenerate dialog collected; without it the asset's stored settings run as they are.
+  const runRegeneration = useCallback(async (assetId: string, clipId?: string, override?: GenerationParams) => {
     if (!projectId || isRegenerating) return
     const asset = assets.find(candidate => candidate.id === assetId)
     if (!asset) return
 
     startClipRegeneration(assetId, clipId)
 
-    let generationParams = asset.generationParams
+    let generationParams: GenerationParams | undefined = override ?? asset.generationParams
     if (!generationParams) {
-      try {
-        const clipPath = resolveAssetPreviewPath(assets, clips, asset, clipId)
-        let framePath = ''
-
-        if (asset.type === 'video' && clipPath) {
-          const frame = await window.electronAPI.extractVideoFrame({
-            videoPath: clipPath,
-            seekTime: 0.1,
-            width: 512,
-            quality: 3,
-          })
-          framePath = frame.path
-        } else if (asset.type === 'image' && clipPath) {
-          framePath = clipPath
-        }
-
-        if (framePath) {
-          const result = await ApiClient.suggestGapPrompt({
-            gapDuration: asset.duration || 5,
-            mode: asset.type === 'image' ? 'text-to-image' : 'text-to-video',
-            beforePrompt: '',
-            afterPrompt: '',
-            beforeFrame: framePath,
-            afterFrame: '',
-          })
-          if (!result.ok) {
-            throw new Error(result.error.message)
-          }
-
-          const promptSuggestion = result.data
-          if (promptSuggestion.suggested_prompt) {
-            generationParams = {
-              mode: asset.type === 'image' ? 'text-to-image' : 'text-to-video',
-              prompt: promptSuggestion.suggested_prompt,
-              model: 'fast',
-              duration: asset.duration || 5,
-              resolution: asset.type === 'image'
-                ? normalizeImageResolution(asset.resolution)
-                : normalizeVideoResolution(asset.resolution),
-              fps: 24,
-              audio: false,
-              cameraMotion: 'none',
-            }
-            updateAsset(asset.id, { generationParams })
-          }
-        }
-      } catch (error) {
-        logger.warn(`Failed to auto-generate prompt for imported asset: ${error}`)
-      }
-
+      generationParams = (await suggestParams(asset, clipId)) ?? undefined
       if (!generationParams) {
         failClipRegeneration(
           'Could not auto-generate a prompt for this clip. Try using "Send to GenSpace" instead.',
@@ -198,6 +240,7 @@ export function useRegeneration(params: UseRegenerationParams) {
         return
       }
     }
+    regenJobRef.current = generationParams
 
     if (generationParams.mode === 'retake') {
       failClipRegeneration(
@@ -290,10 +333,98 @@ export function useRegeneration(params: UseRegenerationParams) {
     startClipRegeneration,
     failClipRegeneration,
     assets,
-    clips,
-    updateAsset,
+    suggestParams,
     shouldVideoGenerateWithLtxApi,
   ])
+
+  const closeRegenDialog = useCallback(() => setRegenDialog(null), [])
+
+  // The entry point for every Regenerate button: ask first, so the prompt and settings can
+  // change. `quick` (Shift-click) keeps the old one-click re-run.
+  const handleRegenerate = useCallback((assetId: string, clipId?: string, options?: RegenerateOptions) => {
+    if (!projectId) return
+    const asset = assets.find(candidate => candidate.id === assetId)
+    if (!asset) return
+    const stored = asset.generationParams
+
+    // Retake and IC-LoRA runs cannot be redone here; the run step reports that.
+    if (options?.quick || stored?.mode === 'retake' || stored?.mode === 'ic-lora') {
+      if (busy) {
+        // Only a shot with stored settings can wait its turn; there is nothing to freeze otherwise.
+        if (options?.quick && stored && stored.mode !== 'retake' && stored.mode !== 'ic-lora') {
+          setRegenQueue(prev => enqueueRegen(prev, makeRegenJob({ assetId, clipId, label: jobLabel(asset, stored.prompt), params: stored })))
+        }
+        return
+      }
+      void runRegeneration(assetId, clipId)
+      return
+    }
+
+    const base = {
+      assetId,
+      clipId,
+      assetName: assetFileName(asset),
+      assetType: asset.type,
+      thumbnailPath: asset.bigThumbnailPath || asset.smallThumbnailPath,
+    }
+    if (stored) {
+      setRegenDialog({ ...base, promptSuggested: false, suggesting: false, params: stored })
+      return
+    }
+    setRegenDialog({ ...base, promptSuggested: false, suggesting: true, params: defaultParamsFor(asset, '') })
+    void suggestParams(asset, clipId).then(suggested => {
+      setRegenDialog(current => {
+        if (!current || current.assetId !== assetId || current.clipId !== clipId) return current
+        return {
+          ...current,
+          suggesting: false,
+          promptSuggested: !!suggested,
+          params: suggested ?? current.params,
+        }
+      })
+    })
+  }, [assets, isRegenerating, projectId, runRegeneration, suggestParams])
+
+  // Another shot is rendering (or waiting), so this one joins the line with its settings frozen.
+  const confirmRegenerate = useCallback((params: GenerationParams) => {
+    const current = regenDialog
+    if (!current) return
+    setRegenDialog(null)
+    if (busy) {
+      const asset = assets.find(candidate => candidate.id === current.assetId)
+      if (!asset) return
+      setRegenQueue(prev => enqueueRegen(prev, makeRegenJob({
+        assetId: current.assetId,
+        clipId: current.clipId,
+        label: jobLabel(asset, params.prompt),
+        params,
+      })))
+      return
+    }
+    void runRegeneration(current.assetId, current.clipId, params)
+  }, [assets, busy, regenDialog, runRegeneration])
+
+  const removeFromRegenQueue = useCallback((id: string) => setRegenQueue(prev => removeRegen(prev, id)), [])
+  const moveInRegenQueue = useCallback(
+    (id: string, to: 'up' | 'down' | 'top') => setRegenQueue(prev => moveRegen(prev, id, to)),
+    [],
+  )
+  const clearRegenQueue = useCallback(() => setRegenQueue([]), [])
+
+  // Start the next waiting shot once the current one is fully done (saved as a take, or
+  // failed). While an error is on screen the line waits, so the error is not lost.
+  useEffect(() => {
+    if (regenQueue.length === 0) return
+    if (isRegenerating || regeneratingAssetId) return
+    // The last result must be saved and cleared first. The save effects below pair whatever
+    // path is still held with whichever shot is regenerating, so starting the next job while
+    // the old path lingers would file the previous shot's video under the new one.
+    if (regenVideoPath || regenImagePath) return
+    if (regenError || regenerationPreError) return
+    const [next, ...rest] = regenQueue
+    setRegenQueue(rest)
+    void runRegeneration(next.assetId, next.clipId, next.params)
+  }, [regenQueue, isRegenerating, regeneratingAssetId, regenVideoPath, regenImagePath, regenError, regenerationPreError, runRegeneration])
 
   const handleCancelRegeneration = useCallback(() => {
     if (!canCancelInFlight) return
@@ -317,16 +448,38 @@ export function useRegeneration(params: UseRegenerationParams) {
       return
     }
 
-    applyGeneratedTake(assetId, {
+    // The result is a new asset, so the shot it replaced stays in the library and in GenSpace.
+    const source = assets.find(candidate => candidate.id === assetId)
+    const params = regenJobRef.current ?? source?.generationParams
+    const measuredDuration = type === 'video' ? await probeVideoDuration(pathToFileUrl(copied.path)) : undefined
+    const now = Date.now()
+    applyRegeneratedAsset({
+      id: `asset-${now}-${Math.random().toString(36).slice(2, 11)}`,
+      type,
       path: copied.path,
       bigThumbnailPath: copied.bigThumbnailPath,
       smallThumbnailPath: copied.smallThumbnailPath,
       width: copied.width,
       height: copied.height,
-      createdAt: Date.now(),
+      prompt: params?.prompt ?? source?.prompt ?? '',
+      resolution: params?.resolution ?? source?.resolution ?? '',
+      duration: type === 'video' ? (measuredDuration ?? params?.duration ?? source?.duration ?? undefined) : undefined,
+      binId: source?.binId,
+      generationParams: params,
+      takes: [{
+        path: copied.path,
+        bigThumbnailPath: copied.bigThumbnailPath,
+        smallThumbnailPath: copied.smallThumbnailPath,
+        width: copied.width,
+        height: copied.height,
+        createdAt: now,
+      }],
+      activeTakeIndex: 0,
+      createdAt: now,
     }, clipId ?? undefined)
+    regenJobRef.current = null
     regenReset()
-  }, [applyGeneratedTake, cancelClipRegeneration, projectId, regenReset])
+  }, [applyRegeneratedAsset, assets, cancelClipRegeneration, projectId, regenReset])
 
   useEffect(() => {
     if (cancelRequestedRef.current) return
@@ -375,5 +528,16 @@ export function useRegeneration(params: UseRegenerationParams) {
     handleRegenerate,
     handleCancelRegeneration,
     dismissRegenerationPreError,
+    regenDialog,
+    closeRegenDialog,
+    confirmRegenerate,
+    regenBusy: busy,
+    regeneratingLabel: regeneratingAssetId
+      ? assetFileName(assets.find(a => a.id === regeneratingAssetId) ?? ({ path: '' } as Asset))
+      : null,
+    regenQueue,
+    removeFromRegenQueue,
+    moveInRegenQueue,
+    clearRegenQueue,
   }
 }
