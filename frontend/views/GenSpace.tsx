@@ -39,6 +39,7 @@ import type { Asset } from '../types/project-model'
 import { GenerationErrorDialog } from '../components/GenerationErrorDialog'
 import { addVisualAssetToProject } from '../lib/asset-copy'
 import { ReframeEditor, type ReframeRect, type ReframeKeyframe } from '../components/ReframeEditor'
+import { TrimStartBar } from '../components/TrimStartBar'
 import { pathToFileUrl } from '../lib/file-url'
 import { GPM_IMAGE_DND_TYPE, saveDataUrlToTempFile, type GpmDndImage } from '../components/gpm/gpm-image-file'
 import { FILE_DND, type LibFile } from '../components/gpm/DownloadsBrowser'
@@ -1918,7 +1919,7 @@ function continuationResolution(shortSide: number): string {
 
 const DEFAULT_VIDEO_SETTINGS = {
   model: 'fast',
-  duration: 5 as number | null,
+  duration: null as number | null, // null = Auto; falls back to a fixed length where Auto isn't available
   videoResolution: '540p',
   fps: 24,
   aspectRatio: '16:9',
@@ -2006,6 +2007,11 @@ export function GenSpace() {
   const [reframing, setReframing] = useState(false)
   const [reframeNotice, setReframeNotice] = useState<string | null>(null)
   useEffect(() => { setReframing(false); setReframeNotice(null) }, [selectedAsset?.id])
+  // Lightbox "Trim start": drop the first N frames and save the result as a new asset.
+  const [trimOpen, setTrimOpen] = useState(false)
+  const [trimFrames, setTrimFrames] = useState('20')
+  const [trimBusy, setTrimBusy] = useState(false)
+  useEffect(() => { setTrimOpen(false); setTrimBusy(false) }, [selectedAsset?.id])
   // Live render stopwatch: elapsedMs ticks while generating and freezes on
   // completion; generationStartRef feeds the render time stored on the asset.
   const [elapsedMs, setElapsedMs] = useState(0)
@@ -3949,6 +3955,54 @@ export function GenSpace() {
     setReframeNotice(`Saved 9:16 version (${copied.width}×${copied.height}) to the gallery and Studio Assets`)
   }, [currentProjectId, addAsset])
 
+  // Trim start: cut the first N frames of a video and import the result (same
+  // prompt + tag) in place of the original, so only the edited clip stays in the
+  // gallery and the video editor. A copy is quick-saved into the open Studio
+  // Assets folder. The trimmed clip keeps the original's generation settings so
+  // Regenerate still works on it.
+  const handleTrimStartSave = useCallback(async (source: Asset, startFrame: number) => {
+    const api = window.electronAPI
+    if (!api || !currentProjectId) throw new Error('No project open')
+    if (source.type !== 'video') throw new Error('Only videos can be trimmed')
+    const { path: trimmedPath, fps, duration: trimmedDuration } = await api.trimVideoStart({ videoPath: source.path, startFrame })
+    const copied = await addVisualAssetToProject(trimmedPath, currentProjectId, 'video')
+    if (!copied) throw new Error('Could not add the trimmed file to the project')
+    const trimmedAsset = addAsset(currentProjectId, {
+      type: 'video',
+      path: copied.path,
+      bigThumbnailPath: copied.bigThumbnailPath,
+      smallThumbnailPath: copied.smallThumbnailPath,
+      width: copied.width,
+      height: copied.height,
+      prompt: source.prompt,
+      resolution: source.resolution ?? `${copied.width}x${copied.height}`,
+      // Real length of the trimmed file: the source's stored duration is the
+      // requested length and can be shorter than the file, which made the editor
+      // cut the clip's tail.
+      duration: trimmedDuration ?? (source.duration != null && fps > 0 ? Math.max(0, source.duration - startFrame / fps) : source.duration),
+      binId: source.binId,
+      // generationParams is required for the gallery to list it. Keep the source's
+      // so the trimmed clip stays regenerable; fall back to a derived-asset stub
+      // ('reframe' mode, kept out of Regenerate) for clips that have none.
+      generationParams: source.generationParams ?? {
+        mode: 'reframe',
+        prompt: source.prompt,
+        model: '',
+        duration: trimmedDuration ?? source.duration ?? null,
+        resolution: `${copied.width}x${copied.height}`,
+        fps: Math.round(fps),
+        audio: false,
+        cameraMotion: 'none',
+      },
+    })
+    await saveToStudioAssets(copied.path, source.prompt)
+    // Replace, don't duplicate: drop the untrimmed original from the project and
+    // keep the lightbox on the trimmed clip.
+    deleteAsset(currentProjectId, source.id)
+    setSelectedAsset(trimmedAsset)
+    setReframeNotice(`Trimmed ${startFrame} frames off the start; the trimmed clip replaced the original and was saved to Studio Assets`)
+  }, [currentProjectId, addAsset, deleteAsset])
+
   const handleEditImage = (imageAsset: Asset) => {
     setMode('image')
     setInputImage(imageAsset.path)
@@ -5045,6 +5099,25 @@ export function GenSpace() {
               {selectedAsset.type === 'video' && (
               <button
                 onClick={() => {
+                  setReframeNotice(null)
+                  // Pre-fill with the playhead so scrubbing to the first good frame
+                  // and clicking Trim start is one step; keep the last value if at 0.
+                  const v = enlargedVideoRef.current
+                  const fps = selectedAsset.generationParams?.fps || 24
+                  const atFrame = v && Number.isFinite(v.currentTime) ? Math.round(v.currentTime * fps) : 0
+                  if (atFrame > 0) setTrimFrames(String(atFrame))
+                  setTrimOpen(open => !open)
+                }}
+                title="Cut the first frames off this clip and save it as a new clip"
+                className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium flex items-center gap-2 transition-colors"
+              >
+                <Scissors className="h-4 w-4" />
+                Trim start
+              </button>
+              )}
+              {selectedAsset.type === 'video' && (
+              <button
+                onClick={() => {
                   const asset = selectedAsset
                   if (!asset) return
                   // Grab the currently shown frame. The modal <video> autoplays,
@@ -5070,6 +5143,60 @@ export function GenSpace() {
               </button>
               )}
             </div>
+            )}
+            {!reframing && trimOpen && selectedAsset.type === 'video' && (
+              <TrimStartBar
+                videoRef={enlargedVideoRef}
+                fps={selectedAsset.generationParams?.fps || 24}
+                frames={Math.max(0, Math.floor(Number(trimFrames)) || 0)}
+                onChange={(n) => setTrimFrames(String(n))}
+              />
+            )}
+            {!reframing && trimOpen && selectedAsset.type === 'video' && (
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm text-zinc-300">
+                <span>Cut the first</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={trimFrames}
+                  onChange={(e) => setTrimFrames(e.target.value)}
+                  className="w-16 rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1 text-white text-center"
+                />
+                <span>frames</span>
+                <button
+                  onClick={() => {
+                    const v = enlargedVideoRef.current
+                    if (!v) return
+                    v.pause()
+                    const fps = selectedAsset.generationParams?.fps || 24
+                    setTrimFrames(String(Math.max(1, Math.round(v.currentTime * fps))))
+                  }}
+                  title="Pause and use the frame currently shown as the new first frame"
+                  className="px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-white transition-colors"
+                >
+                  Use playhead
+                </button>
+                <button
+                  disabled={trimBusy || !(Number(trimFrames) >= 1)}
+                  onClick={async () => {
+                    const asset = selectedAsset
+                    setTrimBusy(true)
+                    try {
+                      await handleTrimStartSave(asset, Math.floor(Number(trimFrames)))
+                      setTrimOpen(false)
+                    } catch (err) {
+                      logger.error(`Trim start failed: ${err}`)
+                      setReframeNotice(null)
+                      setLocalError(createLocalGenerationError(`Trim start failed: ${err instanceof Error ? err.message : String(err)}`))
+                    } finally {
+                      setTrimBusy(false)
+                    }
+                  }}
+                  className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium transition-colors"
+                >
+                  {trimBusy ? 'Trimming…' : 'Trim & save'}
+                </button>
+              </div>
             )}
             <div className="mt-4 text-center">
               <div className="inline-flex items-start gap-2 max-w-full">

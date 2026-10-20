@@ -5,6 +5,7 @@ import {
   extractVideoFrameToFile,
   extractLastFrameToFile,
   trimFirstFrameToFile,
+  trimStartFramesToFile,
   reframeCropToFile,
   getVideoDimensions,
   getVideoFps,
@@ -72,6 +73,16 @@ export function registerVideoProcessingHandlers(): void {
     const outPath = path.join(dir, `continuation_${stamp()}.mp4`)
     trimFirstFrameToFile({ videoPath, outputPath: outPath, colorMatchReferencePath: colorMatchReference })
     return { path: outPath }
+  })
+
+  // Trim start: cut the first N frames into a temp file; the renderer then imports
+  // it into the project so it lands in the gallery and the video editor.
+  handle('trimVideoStart', async ({ videoPath, startFrame }) => {
+    const outDir = path.join(os.tmpdir(), 'rix-trim')
+    fs.mkdirSync(outDir, { recursive: true })
+    const parsed = path.parse(videoPath)
+    const outPath = path.join(outDir, `${parsed.name}-trim${startFrame}f-${stamp()}.mp4`)
+    return trimStartFramesToFile({ videoPath, outputPath: outPath, startFrame })
   })
 
   // Reframe (e.g. 16:9 → 9:16): crop into a temp file; the renderer then imports

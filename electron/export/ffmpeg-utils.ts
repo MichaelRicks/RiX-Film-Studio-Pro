@@ -223,6 +223,20 @@ export function getVideoFps(ffmpegPath: string, videoPath: string): number {
   }
 }
 
+/** Parse the container duration (seconds) from ffmpeg -i output; null if unreadable. */
+export function getVideoDurationSeconds(ffmpegPath: string, videoPath: string): number | null {
+  try {
+    const result = spawnSync(ffmpegPath, ['-i', videoPath, '-hide_banner'], { encoding: 'utf8', timeout: 5000 })
+    const output = (result.stdout || '') + (result.stderr || '')
+    const m = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/)
+    if (!m) return null
+    const seconds = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Extract the final frame of a video to a full-resolution PNG. Reads only the
  * last second (`-sseof -1`) and reverses it so `-frames:v 1` yields the true
@@ -359,6 +373,41 @@ export function trimFirstFrameToFile({ videoPath, outputPath, colorMatchReferenc
   runFfmpegSyncOrThrow(ffmpegPath, args, timeoutMs)
   if (!fs.existsSync(outputPath)) throw new Error('ffmpeg produced no output file')
   return outputPath
+}
+
+/**
+ * Re-encode a video with its first `startFrame` frames removed (and the matching
+ * audio slice dropped so A/V stays in sync). Used by the enlarged preview's "Trim
+ * start" to cut off a leading run of unwanted frames, e.g. a reference sheet that
+ * flashes before the generated scene takes over.
+ */
+export function trimStartFramesToFile({ videoPath, outputPath, startFrame, timeoutMs = 120000 }: {
+  videoPath: string
+  outputPath: string
+  startFrame: number
+  timeoutMs?: number
+}): { path: string; fps: number; duration: number | null } {
+  const ffmpegPath = findFfmpegPath()
+  if (!ffmpegPath) throw new Error('ffmpeg not found')
+  if (!fs.existsSync(videoPath)) throw new Error(`Video file not found: ${videoPath}`)
+  const frames = Math.floor(startFrame)
+  if (!Number.isFinite(frames) || frames < 1) throw new Error('Trim start needs at least 1 frame')
+
+  const hasAudio = fileHasAudio(ffmpegPath, videoPath)
+  const fps = getVideoFps(ffmpegPath, videoPath)
+  const args: string[] = [
+    '-i', videoPath,
+    '-vf', `trim=start_frame=${frames},setpts=PTS-STARTPTS`,
+    ...(hasAudio
+      ? ['-af', `atrim=start=${(frames / fps).toFixed(6)},asetpts=PTS-STARTPTS`, '-c:a', 'aac', '-b:a', '192k']
+      : ['-an']),
+    '-c:v', 'libx264', '-crf', '12', '-preset', 'medium', '-pix_fmt', 'yuv420p',
+    '-y', outputPath,
+  ]
+  logger.info(`[trim-start] ${args.join(' ').slice(0, 300)}`)
+  runFfmpegSyncOrThrow(ffmpegPath, args, timeoutMs)
+  if (!fs.existsSync(outputPath)) throw new Error('ffmpeg produced no output file')
+  return { path: outputPath, fps, duration: getVideoDurationSeconds(ffmpegPath, outputPath) }
 }
 
 /**

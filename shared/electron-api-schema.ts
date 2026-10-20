@@ -560,6 +560,13 @@ export const electronAPISchemas = {
     input: z.object({ videoPath: z.string(), colorMatchReference: z.string().optional(), folder: z.string().optional() }),
     output: z.object({ path: z.string() }),
   },
+  // Trim start: drop the first `startFrame` frames of a video into a temp file;
+  // the caller imports it into the project as a new asset.
+  trimVideoStart: {
+    input: z.object({ videoPath: z.string(), startFrame: z.number().int().min(1) }),
+    // duration = the trimmed file's real length (null if ffmpeg couldn't read it).
+    output: z.object({ path: z.string(), fps: z.number(), duration: z.number().nullable() }),
+  },
   // Reframe: crop an image/video to a region (source pixels), optionally scaling
   // the result to outWidth×outHeight. Writes to a temp file; the caller imports it
   // into the project like any other asset.
