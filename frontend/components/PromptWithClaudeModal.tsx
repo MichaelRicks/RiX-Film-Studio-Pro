@@ -12,9 +12,13 @@ import { pathToFileUrl } from '../lib/file-url'
  */
 
 type ShotCount = 2 | 3 | 4
+// 'first-frame': the image is the opening frame. 'sheet': a character/prop/location reference
+// sheet used only as an ingredient (rix-prompt-sheet skill), never shown or animated.
+type ImageKind = 'first-frame' | 'sheet'
 
 export interface PromptBrief {
   imagePath: string | null
+  imageKind: ImageKind
   idea: string
   shots: ShotCount
   dialogue: boolean
@@ -22,13 +26,18 @@ export interface PromptBrief {
 }
 
 export function buildPromptBrief(brief: PromptBrief): string {
+  const sheet = brief.imageKind === 'sheet' && !!brief.imagePath
   const lines = [
-    'Write a multi-shot video prompt for RiX with the rix-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.',
+    sheet
+      ? 'Write a multi-shot video prompt for RiX with the rix-prompt-sheet skill, then put it in RiX\'s prompt box with set_generation_prompt.'
+      : 'Write a multi-shot video prompt for RiX with the rix-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.',
     '',
     brief.imagePath
-      ? `Reference image (it becomes the first frame; look at it with inspect_media): ${brief.imagePath}`
+      ? sheet
+        ? `Reference sheet (look at it with inspect_media). It is an ingredient only: the video is a NEW scene that borrows the character, props and place from it. Never show or animate the sheet or its panels: ${brief.imagePath}`
+        : `Reference image (it becomes the first frame; look at it with inspect_media): ${brief.imagePath}`
       : 'Reference image: none. Write the prompt from the idea alone.',
-    `Idea: ${brief.idea.trim() || '(none given: pick a simple, fitting scene from the image)'}`,
+    `Idea: ${brief.idea.trim() || (sheet ? '(none given: invent a fitting location and a simple scene for this character)' : '(none given: pick a simple, fitting scene from the image)')}`,
     `Shots: ${brief.shots}`,
     brief.dialogue
       ? 'Dialogue: include a few short spoken lines if they suit the scene.'
@@ -56,7 +65,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, onClose }: {
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [brief, setBrief] = useState<PromptBrief>({
-    imagePath, idea: '', shots: 3, dialogue: true, existingPrompt,
+    imagePath, imageKind: 'first-frame', idea: '', shots: 3, dialogue: true, existingPrompt,
   })
   const set = <K extends keyof PromptBrief>(k: K, v: PromptBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
 
@@ -129,7 +138,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, onClose }: {
                 <>
                   <p className="text-xs text-zinc-300 leading-relaxed">
                     Claude runs in your own Claude app, on your own Claude plan. Connecting adds RiX's tools to Claude Code and
-                    installs the RiX skills in your Claude skills folder.
+                    installs the RiX skills in your Claude skills folder. It also lets Claude read your image and fill the prompt box without asking at each step.
                   </p>
                   <button
                     onClick={() => void connect()}
@@ -190,11 +199,26 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, onClose }: {
                 No image
               </div>
             )}
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              {imagePath
-                ? 'Claude will look at this image and write shot 1 to match it exactly, then carry the same look through every cut.'
-                : 'No first-frame image is set. Claude will write the prompt from your idea alone. Add an image first for the best consistency.'}
-            </p>
+            <div className="space-y-2 min-w-0">
+              {imagePath && (
+                <div className="flex gap-2">
+                  {([['first-frame', 'First frame'], ['sheet', 'Character sheet']] as [ImageKind, string][]).map(([k, label]) => (
+                    <button key={k} onClick={() => set('imageKind', k)}
+                      className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+                        brief.imageKind === k ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                {!imagePath
+                  ? 'No first-frame image is set. Claude will write the prompt from your idea alone. Add an image first for the best consistency.'
+                  : brief.imageKind === 'sheet'
+                    ? 'Claude will read this sheet for the character, props and place, then write a new scene with them. The sheet itself is only a reference and is kept out of the prompt\'s scene.'
+                    : 'Claude will look at this image and write shot 1 to match it exactly, then carry the same look through every cut.'}
+              </p>
+            </div>
           </div>
 
           <div>

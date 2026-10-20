@@ -11,12 +11,16 @@ import { logger } from '../logger'
  * login — RiX never touches Claude credentials) can drive the RiX editor:
  *   1. registers this install's MCP endpoint (url + bearer token) as a user-scope
  *      MCP server named "rix-editor" in Claude Code;
- *   2. installs the bundled skills (rix-editor, rix-prompt) into ~/.claude/skills.
+ *   2. installs the bundled skills (rix-editor, rix-prompt, rix-prompt-sheet) into ~/.claude/skills;
+ *   3. allows the two calls "Prompt with Claude" needs (inspect_media, set_generation_prompt) and its
+ *      two skills in ~/.claude/settings.json, so Claude doesn't ask before each step. Neither call
+ *      generates, edits or deletes anything. The editor's cut/export tools still ask.
  * Only runs when the user clicks Connect. Everything it writes is listed in the UI.
  */
 
 // rix-editor: cutting/exporting in the Video Editor. rix-prompt: "Prompt with Claude" on Generate.
-const SKILL_NAMES = ['rix-editor', 'rix-prompt'] as const
+// rix-prompt-sheet: the same, when the image is a character/reference sheet.
+const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-prompt-sheet'] as const
 type SkillName = (typeof SKILL_NAMES)[number]
 // Dev builds register under their own name: they have a different token than an
 // installed build on the same machine, and sharing one name would make each
@@ -24,6 +28,13 @@ type SkillName = (typeof SKILL_NAMES)[number]
 const SERVER_NAME = isDev ? 'rix-editor-dev' : 'rix-editor'
 
 const claudeConfigPath = () => path.join(os.homedir(), '.claude.json')
+const claudeSettingsPath = () => path.join(os.homedir(), '.claude', 'settings.json')
+const ALLOW_RULES = [
+  `mcp__${SERVER_NAME}__inspect_media`,
+  `mcp__${SERVER_NAME}__set_generation_prompt`,
+  'Skill(rix-prompt)',
+  'Skill(rix-prompt-sheet)',
+]
 const skillDir = (name: SkillName) => path.join(os.homedir(), '.claude', 'skills', name)
 const skillPath = (name: SkillName) => path.join(skillDir(name), 'SKILL.md')
 const bundledSkillPath = (name: SkillName) => (isDev
@@ -117,12 +128,31 @@ function installSkill(name: SkillName, update: boolean): 'installed' | 'updated'
   return existing === null ? 'installed' : 'updated'
 }
 
+/** Add our allow rules to ~/.claude/settings.json (backup first, atomic replace, nothing else touched). */
+function allowPromptCalls(): void {
+  const file = claudeSettingsPath()
+  let cfg: Record<string, unknown> = {}
+  if (fs.existsSync(file)) {
+    try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown> } catch { return } // unreadable: leave it alone
+    fs.copyFileSync(file, `${file}.rix-backup`)
+  }
+  const perms = { ...((cfg.permissions as Record<string, unknown> | undefined) ?? {}) }
+  const allow = Array.isArray(perms.allow) ? (perms.allow as string[]) : []
+  const missing = ALLOW_RULES.filter(r => !allow.includes(r))
+  if (missing.length === 0) return
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const tmp = `${file}.rix-tmp`
+  fs.writeFileSync(tmp, JSON.stringify({ ...cfg, permissions: { ...perms, allow: [...allow, ...missing] } }, null, 2), 'utf8')
+  fs.renameSync(tmp, file)
+}
+
 export function connectClaude(endpoint: Endpoint, opts: { updateSkill?: boolean } = {}) {
   const cli = findClaudeCli()
   let via: 'cli' | 'config'
   if (cli && registerViaCli(cli, endpoint)) via = 'cli'
   else { registerViaConfig(endpoint); via = 'config' }
   const results = SKILL_NAMES.map(n => installSkill(n, opts.updateSkill === true))
+  try { allowPromptCalls() } catch (e) { logger.warn(`[Connect Claude] could not update permissions: ${String(e)}`) }
   // One summary value for the UI: anything installed/updated wins over kept/current.
   const skill = (['updated', 'installed', 'kept', 'current'] as const).find(r => results.includes(r)) ?? 'current'
   logger.info(`[Connect Claude] registered via ${via}; skill ${skill}`)
