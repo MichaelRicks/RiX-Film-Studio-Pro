@@ -11,17 +11,17 @@
 import { logger } from './logger'
 import { flashToast } from './video-save-actions'
 
-export async function frameSeedFromVideo(videoPath: string): Promise<string | null> {
+export async function frameSeedFromVideo(videoPath: string, seekTime?: number): Promise<string | null> {
   const api = window.electronAPI
   if (!api?.extractVideoSeedFrame) {
     flashToast('Restart the app to drop videos here', true)
     return null
   }
   try {
-    const res = await api.extractVideoSeedFrame({ videoPath })
+    const res = await api.extractVideoSeedFrame({ videoPath, seekTime })
     return res?.path || null
   } catch (err) {
-    logger.error(`Could not extract the first frame of ${videoPath}: ${err}`)
+    logger.error(`Could not extract the frame at ${seekTime ?? 0}s of ${videoPath}: ${err}`)
     flashToast('Could not read that video', true)
     return null
   }

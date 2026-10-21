@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { ApiClient } from '../lib/api-client'
-import { canCancelLocalJob, withGenerationActive } from '../lib/generation-active'
+import { canCancelLocalJob, withExclusiveGeneration } from '../lib/generation-active'
 import { logger } from '../lib/logger'
 import { useAppSettings } from '../contexts/AppSettingsContext'
 import type { RetakeExtendModel } from './use-retake'
@@ -53,7 +53,7 @@ export function useExtend() {
       result: null,
     })
 
-    await withGenerationActive(async () => {
+    await withExclusiveGeneration(async () => {
       const result = await ApiClient.extend({
         video_path: params.videoPath,
         duration: params.duration,

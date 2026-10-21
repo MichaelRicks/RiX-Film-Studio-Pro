@@ -11,10 +11,12 @@ const registry = ((globalThis as Record<string, unknown>).__rixGenPromptTarget ?
   target: PromptTarget | null
 }
 
-/** Called by the mounted Generate screen; returns an unregister function. */
+/** Called by the mounted Generate screen (or a dialog that wants the prompt while it is open);
+ *  returns an unregister function that gives the previous target back. */
 export function registerGenerationPromptTarget(target: PromptTarget): () => void {
+  const previous = registry.target
   registry.target = target
-  return () => { if (registry.target === target) registry.target = null }
+  return () => { if (registry.target === target) registry.target = previous }
 }
 
 export function setGenerationPrompt(prompt: unknown): { ok: true; chars: number } {

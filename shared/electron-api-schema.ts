@@ -538,7 +538,8 @@ export const electronAPISchemas = {
   // into a temp PNG the renderer can hand straight to the image input. Temp, not
   // Continuations — this is a scratch still for a re-roll, not a saved asset.
   extractVideoSeedFrame: {
-    input: z.object({ videoPath: z.string() }),
+    // seekTime (seconds into the file) defaults to 0, the opening frame.
+    input: z.object({ videoPath: z.string(), seekTime: z.number().optional() }),
     output: z.object({ path: z.string() }),
   },
 

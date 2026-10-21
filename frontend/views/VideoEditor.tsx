@@ -63,6 +63,7 @@ import { VideoEditorTimelineEditingPanel } from './editor/VideoEditorTimelineEdi
 import { VideoEditorLayoutMenu } from './editor/VideoEditorLayoutMenu'
 import { useEditorKeyboard } from './editor/useEditorKeyboard'
 import { useRegeneration } from './editor/useRegeneration'
+import { useCorrectedAssetDurations } from './editor/useCorrectedAssetDurations'
 import { RegenerateShotDialog } from './editor/RegenerateShotDialog'
 import { QueuePanel } from './editor/QueuePanel'
 import { useVideoGenerationModelSpecs } from '../hooks/use-video-generation-model-specs'
@@ -598,6 +599,8 @@ function VideoEditorWithStore({
   const overwriteEditRef = useRef<() => void>(() => {})
   const matchFrameRef = useRef<() => void>(() => {})
   
+
+  useCorrectedAssetDurations()
 
   // Regeneration hook (state + logic extracted)
   const {

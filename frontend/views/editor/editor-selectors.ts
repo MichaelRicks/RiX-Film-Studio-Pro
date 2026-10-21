@@ -541,7 +541,8 @@ export function selectClipColorLabel(state: EditorState, clip: TimelineClip): st
 
 export function selectClipMaxDurationFromAssets(assets: Asset[], clip: TimelineClip): number {
   const liveAsset = selectLiveAssetForClipFromAssets(assets, clip)
-  if (clip.type !== 'video' || !liveAsset?.duration) return Infinity
+  // Video and audio clips cannot be pulled out past the end of their media; stills and text have no end.
+  if ((clip.type !== 'video' && clip.type !== 'audio') || !liveAsset?.duration) return Infinity
   const mediaDuration = liveAsset.duration
   const usableMedia = mediaDuration - clip.trimStart - clip.trimEnd
   return Math.max(0.5, usableMedia / clip.speed)

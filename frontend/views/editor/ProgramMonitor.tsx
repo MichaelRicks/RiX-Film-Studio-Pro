@@ -37,6 +37,7 @@ import {
 import { useEditorActions, useEditorStore } from './editor-store'
 import { usePlaybackClips } from './reverse-proxy'
 import { isDroppedMediaEvent, isNativeAssetDragEvent, readDroppedAsset, readDroppedMediaAsset } from './dropped-media-asset'
+import { withMeasuredDuration } from './measure-asset'
 
 type MonitorRenderMode = 'playback' | 'scrub'
 type SyncTarget = 'active' | 'incoming' | 'compositing'
@@ -1324,7 +1325,9 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
             if (isNativeAssetDragEvent(e)) {
               e.preventDefault()
               const asset = readDroppedAsset(e, assets)
-              if (asset) insertAssetsToTimeline({ assets: [asset], trackIndex: 0, startTime: currentTime })
+              if (asset) {
+                void withMeasuredDuration(asset).then(measured => insertAssetsToTimeline({ assets: [measured], trackIndex: 0, startTime: currentTime }))
+              }
               return
             }
             if (!isDroppedMediaEvent(e)) return
@@ -1332,7 +1335,7 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
             void readDroppedMediaAsset(e, currentProjectId).then((asset) => {
               if (!asset) return
               addAssetToEditor(asset)
-              insertAssetsToTimeline({ assets: [asset], trackIndex: 0, startTime: currentTime })
+              void withMeasuredDuration(asset).then(measured => insertAssetsToTimeline({ assets: [measured], trackIndex: 0, startTime: currentTime }))
             })
           }}
           onMouseDown={(e) => {

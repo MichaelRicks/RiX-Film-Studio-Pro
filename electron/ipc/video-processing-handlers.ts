@@ -41,11 +41,11 @@ export function registerVideoProcessingHandlers(): void {
 
   // Seed the prompt bar's start-frame slot from a clip: its opening frame, which
   // is where a re-roll of that shot starts.
-  handle('extractVideoSeedFrame', async ({ videoPath }) => {
+  handle('extractVideoSeedFrame', async ({ videoPath, seekTime }) => {
     const dir = path.join(os.tmpdir(), 'rix-frame-seed')
     fs.mkdirSync(dir, { recursive: true })
     const framePath = path.join(dir, `frame_${stamp()}.png`)
-    extractVideoFrameToFile({ videoPath, seekTime: 0, outputPath: framePath, accurate: true, timeoutMs: 15000 })
+    extractVideoFrameToFile({ videoPath, seekTime: seekTime ?? 0, outputPath: framePath, accurate: true, timeoutMs: 15000 })
     return { path: framePath }
   })
 

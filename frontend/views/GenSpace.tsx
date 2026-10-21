@@ -2859,7 +2859,7 @@ export function GenSpace() {
         if (!copied) throw new Error('Could not persist generated video to project storage')
         // The timeline sizes a clip from asset.duration; for a trimmed continuation the
         // requested length is a frame too long (and absent -> 5s), so use the file's own.
-        const measuredDuration = continuationRun ? await probeVideoDuration(pathToFileUrl(copied.path)) : undefined
+        const measuredDuration = await probeVideoDuration(pathToFileUrl(copied.path))
         addAsset(currentProjectId, {
           type: 'video',
           path: copied.path,
@@ -3922,17 +3922,33 @@ export function GenSpace() {
   // click away — no re-picking the source image or retyping the prompt. The user
   // can tweak anything before hitting Generate; seed behaviour follows the
   // existing Lock Seed setting (unlocked = a fresh variation).
-  const handleRegenerate = useCallback((asset: Asset) => {
+  const handleRegenerate = useCallback(async (asset: Asset) => {
     const params = asset.generationParams
     if (!params || !REGENERABLE_MODES.has(params.mode)) return
     const isImageGen = params.mode === 'text-to-image' || params.mode === 'image-edit'
+
+    // The stored start image is where the clip was generated from, which is not where it
+    // starts once trimmed (a character sheet cut off the front, say). Regenerate from the
+    // frame the clip opens on now. The first frame of an untrimmed clip is the same picture.
+    let startImage = params.inputImageUrl ?? null
+    if (
+      asset.type === 'video' && startImage
+      && (params.mode === 'image-to-video' || params.mode === 'audio-to-video')
+    ) {
+      const framePath = await frameSeedFromVideo(asset.path)
+      if (framePath) {
+        // Keep a copy in the project: the temp file may be gone by the next regenerate.
+        const copied = currentProjectId ? await addVisualAssetToProject(framePath, currentProjectId, 'image') : null
+        startImage = copied?.path ?? framePath
+      }
+    }
 
     // Leave any retake/extend/IC-LoRA panel behind — this is a plain generation.
     setActiveRetakeSource(null)
     setActiveIcLoraSource(null)
     setMode(isImageGen ? 'image' : 'video')
     setPrompt(params.prompt)
-    setInputImage(params.inputImageUrl ?? null)
+    setInputImage(startImage)
     setInputAudio(params.inputAudioUrl ?? null)
     setSettings((prev) => sanitizeVideoSettings({
       ...prev,
@@ -3964,7 +3980,7 @@ export function GenSpace() {
           : []
       }),
     )
-  }, [sanitizeVideoSettings, loraLibrary.items, appSettings.modelsDir, updateAppSettings])
+  }, [sanitizeVideoSettings, loraLibrary.items, appSettings.modelsDir, updateAppSettings, currentProjectId])
 
   // Reframe: crop the source to the chosen 9:16 rect, import the result into the
   // project and add it to the gallery beside the original (same prompt + tag), and

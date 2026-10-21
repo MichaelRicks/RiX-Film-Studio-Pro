@@ -84,6 +84,7 @@ import {
 import { useTimelineDrag } from './useTimelineDrag'
 import { TimelineRulerTicks } from './TimelineRulerTicks'
 import { TimelineScrollbar } from './TimelineScrollbar'
+import { withMeasuredDuration } from './measure-asset'
 import { clampZoom, formatZoom, sliderToZoom, stepZoom, zoomToSlider, ZOOM_SLIDER_MAX } from './timeline-zoom'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds'
@@ -376,7 +377,10 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   }, [actions])
 
   const addClipToTimeline = useCallback((asset: Asset, trackIndex: number, startTime?: number) => {
-    actions.insertAssetsToTimeline({ assets: [asset], trackIndex, startTime })
+    // Read the file's real length first: a clip with no stored length would land as 5 seconds.
+    void withMeasuredDuration(asset).then(measured => {
+      actions.insertAssetsToTimeline({ assets: [measured], trackIndex, startTime })
+    })
   }, [actions])
 
   const addAssetToEditor = useCallback((asset: Asset) => {

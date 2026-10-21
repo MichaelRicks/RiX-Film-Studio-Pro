@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import type { GenerationSettings } from '../components/SettingsPanel'
 import { ApiClient, type ApiRequestBodyOf, type ApiSuccessOf } from '../lib/api-client'
 import { createLocalGenerationError, type GenerationError } from '../lib/generation-errors'
-import { canCancelLocalJob, withGenerationActive } from '../lib/generation-active'
+import { canCancelLocalJob, withExclusiveGeneration } from '../lib/generation-active'
 import { useAppSettings } from '../contexts/AppSettingsContext'
 import { buildGenerateVideoImageInputs } from '../lib/build-generate-video-body'
 import type { GenSpaceMode } from '../lib/genspace-multi-keyframe'
@@ -251,7 +251,7 @@ export function useGeneration(): UseGenerationReturn {
     let progressInterval: ReturnType<typeof setInterval> | null = null
     let shouldApplyPollingUpdates = true
 
-    await withGenerationActive(async () => {
+    await withExclusiveGeneration(async () => {
       try {
         // Prepare JSON body
         const body: Record<string, unknown> = {
@@ -454,7 +454,7 @@ export function useGeneration(): UseGenerationReturn {
       error: null,
     })
 
-    await withGenerationActive(async () => {
+    await withExclusiveGeneration(async () => {
       let progressInterval: ReturnType<typeof setInterval> | null = null
       try {
         // Skip prompt enhancement for T2I - use original prompt directly

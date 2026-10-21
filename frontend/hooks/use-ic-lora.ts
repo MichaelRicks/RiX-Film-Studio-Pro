@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { ApiClient, type ApiRequestBodyOf } from '../lib/api-client'
-import { withGenerationActive } from '../lib/generation-active'
+import { withExclusiveGeneration } from '../lib/generation-active'
 import { logger } from '../lib/logger'
 
 export type IcLoraConditioningType = 'canny' | 'depth' | 'custom'
@@ -88,7 +88,7 @@ export function useIcLora() {
       result: null,
     })
 
-    await withGenerationActive(async () => {
+    await withExclusiveGeneration(async () => {
       const result = await ApiClient.generateIcLora({
         video_path: params.videoPath,
         conditioning_type: params.conditioningType,

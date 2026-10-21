@@ -129,7 +129,7 @@ export function useEditorActions(): EditorActions {
 
     for (const [key, action] of Object.entries(source)) {
       ;(actions as Record<string, (...args: any[]) => void>)[key] = (...args: any[]) => {
-        const apply = key === 'undo' || key === 'redo'
+        const apply = key === 'undo' || key === 'redo' || key === 'correctAssetDurations'
           ? setStateWithoutHistory
           : setStateWithHistory
         apply(prev => action(prev, ...args))

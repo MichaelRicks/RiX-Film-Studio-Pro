@@ -23,6 +23,7 @@ import { TakeContextMenu } from './TakeContextMenu'
 import { pathToFileUrl } from '../../lib/file-url'
 import type { AssetListFilters } from './editor-state'
 import { equalAssetBins, selectAssetBins, selectAssets, selectClips, selectSourceAssetId, selectVisibleAssets } from './editor-selectors'
+import { withMeasuredDuration } from './measure-asset'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { isDroppedMediaEvent, readDroppedMediaAsset } from './dropped-media-asset'
 
@@ -157,7 +158,10 @@ export const VideoEditorAssetsPanel = forwardRef<VideoEditorAssetsPanelHandle, V
   }, [actions])
 
   const addClipToTimeline = useCallback((asset: Asset, trackIndex = 0, startTime?: number) => {
-    actions.insertAssetsToTimeline({ assets: [asset], trackIndex, startTime })
+    // Read the file's real length first: a clip with no stored length would land as 5 seconds.
+    void withMeasuredDuration(asset).then(measured => {
+      actions.insertAssetsToTimeline({ assets: [measured], trackIndex, startTime })
+    })
   }, [actions])
 
   const createAssetFromTake = useCallback((asset: Asset, take: NonNullable<Asset['takes']>[number]): Asset => ({

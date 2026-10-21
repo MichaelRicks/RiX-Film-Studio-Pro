@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { components } from '../generated/backend-openapi'
 import { ApiClient } from '../lib/api-client'
-import { canCancelLocalJob, withGenerationActive } from '../lib/generation-active'
+import { canCancelLocalJob, withExclusiveGeneration } from '../lib/generation-active'
 import { logger } from '../lib/logger'
 import { useAppSettings } from '../contexts/AppSettingsContext'
 
@@ -65,7 +65,7 @@ export function useRetake() {
       result: null,
     })
 
-    await withGenerationActive(async () => {
+    await withExclusiveGeneration(async () => {
       const result = await ApiClient.retake({
         video_path: params.videoPath,
         start_time: params.startTime,

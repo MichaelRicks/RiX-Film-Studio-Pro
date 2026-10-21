@@ -1876,6 +1876,21 @@ export function updateAsset(state: EditorState, assetId: string, patch: Partial<
   }))
 }
 
+/** Replaces stored asset durations with the ones read from the files. Not a user edit: the editor
+ *  applies it without an undo step. Clip lengths are limited by these, so they have to be true. */
+export function correctAssetDurations(state: EditorState, durations: Record<string, number>): EditorState {
+  return updateEditorModel(state, editorModel => {
+    let changed = false
+    const assets = editorModel.assets.map(asset => {
+      const next = durations[asset.id]
+      if (next === undefined || next <= 0 || asset.duration === next) return asset
+      changed = true
+      return { ...asset, duration: next }
+    })
+    return changed ? { ...editorModel, assets } : editorModel
+  })
+}
+
 export function setAssetBin(state: EditorState, assetId: string, binId?: string): EditorState {
   return updateAsset(state, assetId, { binId })
 }

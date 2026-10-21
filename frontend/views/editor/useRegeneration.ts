@@ -7,6 +7,8 @@ import type { GenSpaceMode } from '../../lib/genspace-multi-keyframe'
 import { fromPersistedKeyframes, type KeyframeItem } from '../../lib/multi-keyframe'
 import { addVisualAssetToProject } from '../../lib/asset-copy'
 import { pathToFileUrl } from '../../lib/file-url'
+import { frameSeedFromVideo } from '../../lib/video-frame-seed'
+import { useGlobalGenerationLock } from '../../hooks/use-global-generation-lock'
 import { probeVideoDuration } from '../../lib/probe-video-duration'
 import { ApiClient } from '../../lib/api-client'
 import { logger } from '../../lib/logger'
@@ -91,6 +93,10 @@ export interface RegenDialogState {
   promptSuggested: boolean
   suggesting: boolean
   params: GenerationParams | null
+  /** The clip's own first frame as it sits on the timeline (after any trim), for use as the start frame. */
+  clipFrame?: { status: 'loading' | 'ready' | 'failed'; path?: string; seekTime: number }
+  /** The part of the source file this clip shows. `usesPart` when that is less than the whole file. */
+  clipWindow?: { videoPath: string; start: number; end: number; usesPart: boolean }
 }
 
 function assetFileName(asset: Asset): string {
@@ -181,8 +187,13 @@ export function useRegeneration(params: UseRegenerationParams) {
 
   const [regenDialog, setRegenDialog] = useState<RegenDialogState | null>(null)
   const [regenQueue, setRegenQueue] = useState<RegenJob[]>([])
-  // True while a shot is rendering or others are waiting: new requests join the line.
-  const busy = isRegenerating || !!regeneratingAssetId || regenQueue.length > 0
+  // The backend runs one generation at a time for the whole app, so a job started elsewhere
+  // (Create, a gap fill) also holds the slot. Without this a regenerate clicked meanwhile
+  // would be refused with "a generation is already in progress" instead of waiting.
+  const { isRunning: slotHeldElsewhere } = useGlobalGenerationLock()
+  // True while a shot is rendering, something else holds the slot, or others are waiting:
+  // new requests join the line.
+  const busy = isRegenerating || !!regeneratingAssetId || slotHeldElsewhere || regenQueue.length > 0
 
   // For an asset with no generation record, look at its first frame and have the
   // prompt helper describe it. Null when that is not possible.
@@ -360,12 +371,41 @@ export function useRegeneration(params: UseRegenerationParams) {
       return
     }
 
+    // A trimmed clip no longer starts where its source did (a character sheet, say), so the
+    // regeneration can start from what the clip actually opens on: its first visible frame.
+    const clip = clipId ? clips.find(candidate => candidate.id === clipId) : undefined
+    const seekTime = clip?.trimStart ?? 0
+    const clipFrame: RegenDialogState['clipFrame'] = clip && asset.type === 'video'
+      ? { status: 'loading', seekTime }
+      : undefined
+    if (clipFrame) {
+      const sourcePath = resolveAssetPreviewPath(assets, clips, asset, clipId)
+      void (sourcePath ? frameSeedFromVideo(sourcePath, seekTime) : Promise.resolve(null)).then(framePath => {
+        setRegenDialog(current => {
+          if (!current || current.assetId !== assetId || current.clipId !== clipId) return current
+          return { ...current, clipFrame: { status: framePath ? 'ready' : 'failed', path: framePath ?? undefined, seekTime } }
+        })
+      })
+    }
+
+    let clipWindow: RegenDialogState['clipWindow']
+    if (clip && asset.type === 'video') {
+      const videoPath = resolveAssetPreviewPath(assets, clips, asset, clipId)
+      const start = clip.trimStart ?? 0
+      const end = start + clip.duration * (clip.speed || 1)
+      const sourceLength = asset.duration ?? 0
+      const usesPart = start > 0.04 || (sourceLength > 0 && end < sourceLength - 0.3)
+      if (videoPath) clipWindow = { videoPath, start, end, usesPart }
+    }
+
     const base = {
       assetId,
       clipId,
       assetName: assetFileName(asset),
       assetType: asset.type,
       thumbnailPath: asset.bigThumbnailPath || asset.smallThumbnailPath,
+      clipFrame,
+      clipWindow,
     }
     if (stored) {
       setRegenDialog({ ...base, promptSuggested: false, suggesting: false, params: stored })
@@ -383,13 +423,20 @@ export function useRegeneration(params: UseRegenerationParams) {
         }
       })
     })
-  }, [assets, isRegenerating, projectId, runRegeneration, suggestParams])
+  }, [assets, busy, clips, projectId, runRegeneration, suggestParams])
 
   // Another shot is rendering (or waiting), so this one joins the line with its settings frozen.
-  const confirmRegenerate = useCallback((params: GenerationParams) => {
+  const confirmRegenerate = useCallback(async (chosen: GenerationParams) => {
     const current = regenDialog
     if (!current) return
     setRegenDialog(null)
+    let params = chosen
+    // The clip's frame is a scratch file in the temp folder; keep a copy in the project so
+    // the asset's stored start frame is still there when it is regenerated again later.
+    if (chosen.inputImageUrl && chosen.inputImageUrl === current.clipFrame?.path) {
+      const copied = await addVisualAssetToProject(chosen.inputImageUrl, projectId, 'image')
+      if (copied) params = { ...chosen, inputImageUrl: copied.path }
+    }
     if (busy) {
       const asset = assets.find(candidate => candidate.id === current.assetId)
       if (!asset) return
@@ -402,7 +449,7 @@ export function useRegeneration(params: UseRegenerationParams) {
       return
     }
     void runRegeneration(current.assetId, current.clipId, params)
-  }, [assets, busy, regenDialog, runRegeneration])
+  }, [assets, busy, projectId, regenDialog, runRegeneration])
 
   const removeFromRegenQueue = useCallback((id: string) => setRegenQueue(prev => removeRegen(prev, id)), [])
   const moveInRegenQueue = useCallback(
@@ -415,7 +462,7 @@ export function useRegeneration(params: UseRegenerationParams) {
   // failed). While an error is on screen the line waits, so the error is not lost.
   useEffect(() => {
     if (regenQueue.length === 0) return
-    if (isRegenerating || regeneratingAssetId) return
+    if (isRegenerating || regeneratingAssetId || slotHeldElsewhere) return
     // The last result must be saved and cleared first. The save effects below pair whatever
     // path is still held with whichever shot is regenerating, so starting the next job while
     // the old path lingers would file the previous shot's video under the new one.
@@ -424,7 +471,7 @@ export function useRegeneration(params: UseRegenerationParams) {
     const [next, ...rest] = regenQueue
     setRegenQueue(rest)
     void runRegeneration(next.assetId, next.clipId, next.params)
-  }, [regenQueue, isRegenerating, regeneratingAssetId, regenVideoPath, regenImagePath, regenError, regenerationPreError, runRegeneration])
+  }, [regenQueue, isRegenerating, regeneratingAssetId, slotHeldElsewhere, regenVideoPath, regenImagePath, regenError, regenerationPreError, runRegeneration])
 
   const handleCancelRegeneration = useCallback(() => {
     if (!canCancelInFlight) return

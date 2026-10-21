@@ -1,7 +1,7 @@
 {
   "name": "rix-film-studio-pro",
   "productName": "RiX Film Studio Pro",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "RiX Film Studio Pro — AI video studio built on LTX-2",
   "type": "module",
   "main": "dist-electron/main.js",
@@ -26,7 +26,7 @@
     "openapi:generate": "pnpm openapi:export && pnpm openapi:types",
     "openapi:check": "pnpm openapi:generate && git diff --exit-code -- frontend/generated/backend-openapi.json frontend/generated/backend-openapi.ts",
     "backend:test": "cd backend && uv sync --frozen --extra test --extra dev && uv run pytest -v --tb=short",
-    "scripts:test": "node --test scripts/copy-koffi-native.test.cjs && node --experimental-strip-types --test frontend/lib/build-generate-video-body.test.ts frontend/lib/derive-subject.test.ts frontend/lib/film-looks.test.ts frontend/lib/format.test.ts frontend/lib/genspace-layout.test.ts frontend/lib/genspace-last-frame.test.ts frontend/lib/genspace-multi-keyframe.test.ts frontend/lib/keyframe-controls.test.ts frontend/lib/keyframe-drop.test.ts frontend/lib/keyframe-strength.test.ts frontend/lib/keyframe-timeline.test.ts frontend/lib/multi-keyframe.test.ts frontend/lib/fixed-menu-position.test.ts frontend/lib/enhance-gemini-key.test.ts frontend/views/editor/timeline-snap.test.ts frontend/views/editor/regen-queue.test.ts frontend/lib/genspace-queue.test.ts electron/free-disk-space.test.ts",
+    "scripts:test": "node --test scripts/copy-koffi-native.test.cjs && node --experimental-strip-types --test frontend/lib/build-generate-video-body.test.ts frontend/lib/derive-subject.test.ts frontend/lib/film-looks.test.ts frontend/lib/format.test.ts frontend/lib/genspace-layout.test.ts frontend/lib/genspace-last-frame.test.ts frontend/lib/genspace-multi-keyframe.test.ts frontend/lib/keyframe-controls.test.ts frontend/lib/keyframe-drop.test.ts frontend/lib/keyframe-strength.test.ts frontend/lib/keyframe-timeline.test.ts frontend/lib/multi-keyframe.test.ts frontend/lib/fixed-menu-position.test.ts frontend/lib/enhance-gemini-key.test.ts frontend/views/editor/timeline-snap.test.ts frontend/views/editor/regen-queue.test.ts frontend/lib/genspace-queue.test.ts frontend/lib/trim-prompt-brief.test.ts electron/free-disk-space.test.ts",
     "build": "node scripts/run-script.js scripts/local-build",
     "build:skip-python": "node scripts/run-script.js scripts/local-build --skip-python",
     "build:fast": "node scripts/run-script.js scripts/local-build --unpack --skip-python",

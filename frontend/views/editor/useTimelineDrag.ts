@@ -3,6 +3,7 @@ import type { Asset, TimelineClip, Track } from '../../types/project-model'
 import { resolveOverlaps, migrateClip, type ToolType } from './video-editor-utils'
 import { isDroppedMediaEvent, readDroppedMediaAsset } from './dropped-media-asset'
 import { resolveSnap, snapDropStart, type SnapLock } from './timeline-snap'
+import { withMeasuredDurations } from './measure-asset'
 
 interface DragPreviewPosition {
   startTime: number
@@ -1125,11 +1126,15 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
           const rect = trackContainerRef.current.getBoundingClientRect()
           const scrollLeft = trackContainerRef.current.scrollLeft
           const x = e.clientX - rect.left + scrollLeft
-          let nextStart = dropStart(x / pixelsPerSecond, trackIndex, droppedAssets[0].duration)
-          for (const a of droppedAssets) {
-            addClipToTimeline(a, trackIndex, nextStart)
-            nextStart += a.duration || 5
-          }
+          const rawStart = x / pixelsPerSecond
+          // Lay the clips end to end by their real lengths, not the stored (often missing) ones.
+          void withMeasuredDurations(droppedAssets).then(measured => {
+            let nextStart = dropStart(rawStart, trackIndex, measured[0].duration)
+            for (const a of measured) {
+              addClipToTimeline(a, trackIndex, nextStart)
+              nextStart += a.duration || 5
+            }
+          })
           return
         }
       } catch { /* ignore parse errors */ }
