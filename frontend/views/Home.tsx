@@ -527,7 +527,7 @@ export function Home() {
               {choices.length === 0 ? (
                 <p className="text-sm text-zinc-400 py-8 text-center">This project has no images or videos yet.</p>
               ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 overflow-auto pr-1">
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 overflow-auto pr-1 content-start items-start auto-rows-min min-h-0">
                   {choices.map(asset => {
                     const thumb = asset.bigThumbnailPath || asset.smallThumbnailPath || (asset.type === 'image' ? asset.path : undefined)
                     const selected = target.coverAssetId === asset.id
@@ -536,7 +536,8 @@ export function Home() {
                         key={asset.id}
                         onClick={() => { setProjectCover(target.id, asset.id); close() }}
                         title={asset.prompt}
-                        className={`aspect-video rounded-lg overflow-hidden bg-zinc-800 border-2 transition-colors ${selected ? 'border-blue-500' : 'border-transparent hover:border-zinc-600'}`}
+                        style={{ aspectRatio: asset.width && asset.height ? `${asset.width} / ${asset.height}` : '16 / 9' }}
+                        className={`w-full shrink-0 rounded-lg overflow-hidden bg-zinc-800 border-2 transition-colors ${selected ? 'border-blue-500' : 'border-transparent hover:border-zinc-600'}`}
                       >
                         {thumb ? (
                           <img src={pathToFileUrl(thumb)} alt="" className="w-full h-full object-cover" loading="lazy" />
