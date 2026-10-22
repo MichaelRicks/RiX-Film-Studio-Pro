@@ -892,6 +892,7 @@ function VideoEditorWithStore({
                 className="min-h-0"
               >
                 <EditorLibraryPanel
+                  currentProjectId={currentProjectId}
                   assetsPanel={(
                   <VideoEditorAssetsPanel
                     ref={assetsPanelActionsRef}

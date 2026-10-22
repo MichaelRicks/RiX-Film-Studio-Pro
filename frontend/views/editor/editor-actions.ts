@@ -931,6 +931,68 @@ export function insertAssetsToTimeline(state: EditorState, params: InsertAssetsT
   }))
 }
 
+/** Track names the music tracks get: "Music", "Music 2", ... */
+const MUSIC_TRACK_NAME = /^Music( \d+)?$/
+
+/**
+ * Adds an audio asset (music) at `startTime`, always on a track of its own. It goes on
+ * the track the user dropped it on if that is an audio track with nothing in the span,
+ * else on a free "Music" track, else on a new one. Plain insertion drops audio on the
+ * first audio track and trims whatever is already there, which for music meant eating
+ * the sound of the clips it was laid under. One undo step.
+ *
+ * `duck` (auto-ducking under dialogue) is set on the new clip when given.
+ */
+export function addAudioAssetOnFreeTrack(
+  state: EditorState,
+  params: { asset: Asset; startTime: number; preferredTrackIndex?: number; duck?: { enabled: boolean; amountDb: number } },
+): EditorState {
+  const { asset, startTime } = params
+  let next = addAssetToEditor(state, asset)
+  const end = startTime + (asset.duration || 5)
+  const EPS = 1e-6
+  const isFree = (trackIndex: number) => !selectClips(next).some(
+    clip => clip.trackIndex === trackIndex && clip.startTime < end - EPS && clip.startTime + clip.duration > startTime + EPS,
+  )
+  const usable = (index: number) => {
+    const track = selectTracks(next)[index]
+    return Boolean(track) && track.kind === 'audio' && track.type !== 'subtitle' && !track.locked
+      && track.sourcePatched !== false && isFree(index)
+  }
+
+  let trackIndex = params.preferredTrackIndex !== undefined && usable(params.preferredTrackIndex)
+    ? params.preferredTrackIndex
+    : selectTracks(next).findIndex((track, index) => MUSIC_TRACK_NAME.test(track.name) && usable(index))
+  if (trackIndex < 0) {
+    next = addTrack(next, 'audio')
+    trackIndex = selectTracks(next).length - 1
+    const used = selectTracks(next).filter(track => MUSIC_TRACK_NAME.test(track.name)).length
+    next = mapTracks(next, (track, index) => (
+      index === trackIndex ? { ...track, name: used === 0 ? 'Music' : `Music ${used + 1}` } : track
+    ))
+  }
+  next = insertAssetsToTimeline(next, { assets: [asset], trackIndex, startTime })
+  const { duck } = params
+  if (!duck) return next
+  return mapClips(next, clip => (
+    clip.type === 'audio' && clip.assetId === asset.id && clip.trackIndex === trackIndex && !clip.duck
+      ? { ...clip, duck }
+      : clip
+  ))
+}
+
+/** Sets the ducking marker and volume keyframes of several clips as one undo step. */
+export function setClipsDuckState(
+  state: EditorState,
+  patches: Array<{ id: string; duck: TimelineClip['duck']; volumeKeyframes: TimelineClip['volumeKeyframes'] }>,
+): EditorState {
+  const byId = new Map(patches.map(patch => [patch.id, patch]))
+  return mapClips(state, clip => {
+    const patch = byId.get(clip.id)
+    return patch ? { ...clip, duck: patch.duck, volumeKeyframes: patch.volumeKeyframes } : clip
+  })
+}
+
 export function overwriteAssetsOnTimeline(state: EditorState, params: InsertAssetsToTimelineParams): EditorState {
   const afterInsert = insertAssetsToTimeline(state, params)
   const activeTimeline = selectActiveTimeline(afterInsert)

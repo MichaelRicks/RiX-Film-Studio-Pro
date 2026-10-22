@@ -649,6 +649,39 @@ export const electronAPISchemas = {
   gpmLibGetRoot: { input: z.object({}), output: z.object({ root: z.string(), isDefault: z.boolean() }) },
   gpmLibChooseRoot: { input: z.object({}), output: z.object({ root: z.string().nullable() }) },
   gpmLibResetRoot: { input: z.object({}), output: z.object({ root: z.string() }) },
+  // Built-in music library: songs in a folder on disk plus an optional catalogue.json
+  // describing them (see electron/ipc/music-handlers.ts).
+  musicLibList: {
+    input: z.object({}),
+    output: z.object({
+      root: z.string(),
+      exists: z.boolean(),
+      /** True when a catalogue.json described the tracks; false = just the audio files found. */
+      hasCatalogue: z.boolean(),
+      license: z.string(),
+      tracks: z.array(z.object({
+        id: z.string(),
+        path: z.string(),
+        title: z.string(),
+        version: z.string(),
+        genre: z.string(),
+        mood: z.array(z.string()),
+        vocal: z.enum(['instrumental', 'vocal', 'unknown']),
+        energy: z.enum(['low', 'medium', 'high', 'unknown']),
+        seconds: z.number(),
+        bpm: z.number(),
+        reviewNote: z.string(),
+      })),
+    }),
+  },
+  musicLibChooseRoot: { input: z.object({}), output: z.object({ root: z.string().nullable() }) },
+  musicLibResetRoot: { input: z.object({}), output: z.object({ root: z.string() }) },
+  musicLibReveal: { input: z.object({}), output: emptyResult },
+  // Loudness over time of an audio/video file (for auto-ducking); see electron/audio-envelope.ts.
+  audioEnvelope: {
+    input: z.object({ path: z.string() }),
+    output: z.object({ hop: z.number(), db: z.array(z.number()) }),
+  },
   // --- App updates ---
   getUpdateState: {
     input: z.object({}),

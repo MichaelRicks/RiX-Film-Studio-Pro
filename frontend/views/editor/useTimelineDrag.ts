@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Asset, TimelineClip, Track } from '../../types/project-model'
 import { resolveOverlaps, migrateClip, type ToolType } from './video-editor-utils'
-import { isDroppedMediaEvent, readDroppedMediaAsset } from './dropped-media-asset'
+import { buildAssetFromPath, isDroppedMediaEvent, readDroppedMediaAsset } from './dropped-media-asset'
+import { MUSIC_DND, type MusicDragPayload } from './music-settings'
 import { resolveSnap, snapDropStart, type SnapLock } from './timeline-snap'
 import { withMeasuredDurations } from './measure-asset'
 
@@ -80,6 +81,8 @@ interface UseTimelineDragParams {
   getMaxClipDuration: (clip: TimelineClip) => number
   addClipToTimeline: (asset: Asset, trackIndex: number, startTime?: number) => void
   addAssetToEditor: (asset: Asset) => void
+  /** A song dropped from the MUSIC tab: onto its own track, ducked by default. */
+  addMusicToTimeline: (asset: Asset, startTime: number, preferredTrackIndex: number) => void
   assets: Asset[]
   timelines: any[]
   activeTimeline: any
@@ -139,7 +142,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
     clips, setClips, tracks,
     selectedClipIds, setSelectedClipIds,
     currentTime, setCurrentTime, setIsPlaying,
-    snapEnabled, getMaxClipDuration, addClipToTimeline, addAssetToEditor,
+    snapEnabled, getMaxClipDuration, addClipToTimeline, addAssetToEditor, addMusicToTimeline,
     assets, timelines, activeTimeline, currentProjectId,
     timelineRef, trackContainerRef,
     orderedTracks, getTrackHeight, trackTopPx,
@@ -1068,6 +1071,20 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
 
   const handleTrackDrop = (e: React.DragEvent, trackIndex: number) => {
     e.preventDefault()
+
+    // A song dragged from the MUSIC tab: copy it into the project, then lay it on a track
+    // of its own (the one it was dropped on if that is a free audio track).
+    if (e.dataTransfer.types.includes(MUSIC_DND) && trackContainerRef.current) {
+      try {
+        const song = JSON.parse(e.dataTransfer.getData(MUSIC_DND)) as MusicDragPayload
+        const rect = trackContainerRef.current.getBoundingClientRect()
+        const x = e.clientX - rect.left + trackContainerRef.current.scrollLeft
+        const startTime = Math.max(0, x / pixelsPerSecond)
+        void buildAssetFromPath(song.path, false, currentProjectId, song.title, true)
+          .then((asset) => addMusicToTimeline({ ...asset, prompt: `Music: ${song.title}`, resolution: 'music' }, startTime, trackIndex))
+      } catch { /* malformed drag payload */ }
+      return
+    }
 
     // Image/video dragged from the Prompt Manager Pro Downloads Browser or
     // Images tab — neither is a registered project Asset yet, so build one

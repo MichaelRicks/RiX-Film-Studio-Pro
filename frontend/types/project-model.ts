@@ -395,6 +395,15 @@ export const timelineClipSchema = z.object({
   // stays in one place for the preview and the export to read.
   filmLook: z.object({ presetId: z.string(), intensity: z.number() }).optional(),
   // Zoom / pan / shake preset (shared/clip-motion.ts), added on top of `layer`.
+  // Auto-ducking (shared/music-ducking.ts). While `enabled`, the clip's volumeKeyframes hold the dips
+  // measured under other audio on the timeline, drawn and editable like any volume automation.
+  // `base` is what volumeKeyframes was before ducking (null = a flat volume), restored when it is
+  // turned off and used as the starting level when the dips are recalculated.
+  duck: z.object({
+    enabled: z.boolean(),
+    amountDb: z.number(),
+    base: z.array(z.object({ t: z.number(), value: z.number() })).nullable().optional(),
+  }).optional(),
   // A stack of them; projects saved with the original single preset load as a list of one.
   motion: z.preprocess(
     (v) => (v && !Array.isArray(v) ? [v] : v),

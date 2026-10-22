@@ -26,6 +26,8 @@ import type { GenerationError } from '../../lib/generation-errors'
 import { addVisualAssetToProject } from '../../lib/asset-copy'
 import { GPM_IMAGE_DND_TYPE } from '../../components/gpm/gpm-image-file'
 import { FILE_DND } from '../../components/gpm/DownloadsBrowser'
+import { MUSIC_DND, defaultMusicDuck } from './music-settings'
+import { useMusicDucking } from './useMusicDucking'
 import { GapGenerationModal } from './GapGenerationModal'
 import { ClipContextMenu, type ClipContextMenuState } from './ClipContextMenu'
 import type { TimelineClip, Track, SubtitleClip, Asset, TextOverlayStyle, TransitionType } from '../../types/project-model'
@@ -204,6 +206,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     regenProgress,
   } = props
   const actions = useEditorActions()
+  const ducking = useMusicDucking()
   const { shouldVideoGenerateWithLtxApi } = useAppSettings()
   const {
     modelSpecs: videoGenerationModelSpecsResponse,
@@ -386,6 +389,11 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   const addAssetToEditor = useCallback((asset: Asset) => {
     actions.addAssetToEditor(asset)
   }, [actions])
+
+  const addMusicToTimeline = useCallback((asset: Asset, startTime: number, preferredTrackIndex: number) => {
+    actions.addAudioAssetOnFreeTrack({ asset, startTime, preferredTrackIndex, duck: defaultMusicDuck() })
+    ducking.applyForAsset(asset.id)
+  }, [actions, ducking])
 
   const resolveClipPath = useCallback((clip: TimelineClip | null) => {
     return clip ? selectClipPathFromAssets(assets, clip) : ''
@@ -1344,7 +1352,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     clips, setClips, tracks,
     selectedClipIds, setSelectedClipIds,
     currentTime, setCurrentTime, setIsPlaying,
-    snapEnabled, resolveClipPath, getMaxClipDuration, addClipToTimeline, addAssetToEditor,
+    snapEnabled, resolveClipPath, getMaxClipDuration, addClipToTimeline, addAssetToEditor, addMusicToTimeline,
     assets, timelines, activeTimeline, currentProjectId,
     timelineRef, trackContainerRef,
     orderedTracks, getTrackHeight, trackTopPx, cutPoints,
@@ -2582,6 +2590,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                       e.dataTransfer.types.includes('assetid') || e.dataTransfer.types.includes('assetids')
                       || e.dataTransfer.types.includes('asset') || e.dataTransfer.types.includes('timeline')
                       || e.dataTransfer.types.includes(FILE_DND) || e.dataTransfer.types.includes(GPM_IMAGE_DND_TYPE)
+                      || e.dataTransfer.types.includes(MUSIC_DND)
                     ) {
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'copy'

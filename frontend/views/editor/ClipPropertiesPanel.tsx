@@ -11,6 +11,8 @@ import type { Asset, ClipLayerFrame, TimelineClip, LetterboxSettings, TextOverla
 import { DEFAULT_COLOR_CORRECTION, DEFAULT_LETTERBOX } from '../../types/project-model' // EFFECTS HIDDEN: removed EFFECT_DEFINITIONS, DEFAULT_EFFECT_MASK
 import { TEXT_PRESETS } from '../../types/project'
 import { namedResolutionTier } from '../../lib/video-resolution'
+import { useMusicDucking } from './useMusicDucking'
+import { DEFAULT_DUCK_AMOUNT_DB, MAX_DUCK_AMOUNT_DB, MIN_DUCK_AMOUNT_DB } from '../../../shared/music-ducking'
 import { clipLayerAt, defaultLayerFade, formatTime, isLayerClip } from './video-editor-utils'
 import { Tooltip } from '../../components/ui/tooltip'
 import {
@@ -49,6 +51,7 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
     setCurrentTime,
     updateClip,
   } = useEditorActions()
+  const ducking = useMusicDucking()
   // Keeps W and H in step while resizing from the panel (the preview's corner
   // handles already do this; its edge handles are the way to stretch one axis).
   const [linkLayerScale, setLinkLayerScale] = useState(true)
@@ -835,6 +838,49 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
                 onChange={(e) => updateClip(selectedClip.id, { audioFadeOut: parseFloat(e.target.value) })}
                 className="w-full"
               />
+            </div>
+          )
+        })()}
+
+        {selectedClip.type === 'audio' && (() => {
+          const duck = selectedClip.duck ?? { enabled: false, amountDb: DEFAULT_DUCK_AMOUNT_DB }
+          return (
+            <div className="space-y-1.5">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={duck.enabled}
+                  onChange={(e) => { if (e.target.checked) void ducking.apply([selectedClip.id]); else ducking.remove([selectedClip.id]) }}
+                  className="rounded bg-zinc-800 border-zinc-600"
+                />
+                <span className="text-sm text-zinc-300">Auto-duck under dialogue</span>
+              </label>
+              {duck.enabled && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-zinc-500">Duck by</label>
+                    <span className="text-[10px] text-zinc-400 tabular-nums">{Math.round(duck.amountDb)} dB</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={MIN_DUCK_AMOUNT_DB}
+                    max={MAX_DUCK_AMOUNT_DB}
+                    step={1}
+                    value={duck.amountDb}
+                    onChange={(e) => { void ducking.apply([selectedClip.id], parseInt(e.target.value, 10)) }}
+                    className="w-full"
+                  />
+                  <button
+                    className="mt-1 text-[10px] text-zinc-500 hover:text-blue-400 transition-colors"
+                    onClick={() => { void ducking.apply([selectedClip.id]) }}
+                  >
+                    Recalculate dips
+                  </button>
+                  <p className="mt-1 text-[10px] text-zinc-600 leading-snug">
+                    The dips are volume keyframes on the clip: drag them, add or remove them. Recalculate after moving dialogue (it replaces hand edits); unchecking restores the volume the clip had before.
+                  </p>
+                </div>
+              )}
             </div>
           )
         })()}

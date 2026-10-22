@@ -1,18 +1,22 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { FiltersPanel } from './FiltersPanel'
+import { MusicPanel } from './MusicPanel'
 
-type LibraryTab = 'assets' | 'filters'
+type LibraryTab = 'assets' | 'filters' | 'music'
 
 const TAB_KEY = 'rix.editor.libraryTab'
 
 function readTab(): LibraryTab {
-  try { return localStorage.getItem(TAB_KEY) === 'filters' ? 'filters' : 'assets' } catch { return 'assets' }
+  try {
+    const saved = localStorage.getItem(TAB_KEY)
+    return saved === 'filters' || saved === 'music' ? saved : 'assets'
+  } catch { return 'assets' }
 }
 
-/** The top of the editor's left column: Assets, or FILTERS, one tab each. The Assets panel stays
+/** The top of the editor's left column: Assets, FILTERS or MUSIC, one tab each. The Assets panel stays
  *  mounted while hidden so its selection, scroll and open bins are still there when you come back. */
-export function EditorLibraryPanel({ assetsPanel }: { assetsPanel: ReactNode }) {
+export function EditorLibraryPanel({ assetsPanel, currentProjectId }: { assetsPanel: ReactNode; currentProjectId: string | null }) {
   const [tab, setTabState] = useState<LibraryTab>(readTab)
   const setTab = (next: LibraryTab) => {
     setTabState(next)
@@ -22,7 +26,7 @@ export function EditorLibraryPanel({ assetsPanel }: { assetsPanel: ReactNode }) 
   return (
     <div className="flex flex-col min-h-0 h-full">
       <div className="flex-shrink-0 flex gap-1 px-4 pt-3 border-r border-zinc-800">
-        {([['assets', 'ASSETS'], ['filters', 'FILTERS']] as const).map(([id, label]) => (
+        {([['assets', 'ASSETS'], ['filters', 'FILTERS'], ['music', 'MUSIC']] as const).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -36,6 +40,7 @@ export function EditorLibraryPanel({ assetsPanel }: { assetsPanel: ReactNode }) 
       </div>
       <div className={tab === 'assets' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>{assetsPanel}</div>
       {tab === 'filters' && <div className="flex-1 min-h-0 flex flex-col"><FiltersPanel /></div>}
+      {tab === 'music' && <div className="flex-1 min-h-0 flex flex-col"><MusicPanel currentProjectId={currentProjectId} /></div>}
     </div>
   )
 }
