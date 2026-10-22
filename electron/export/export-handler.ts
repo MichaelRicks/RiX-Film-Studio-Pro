@@ -119,12 +119,11 @@ export async function exportTimelineNative(
   if (vertical) {
     const dims = new Map<string, { width: number; height: number } | null>()
     for (const seg of segments) {
-      const probePath = seg.filePath || seg.placeholderPath
-      if (!probePath) continue
-      if (!dims.has(probePath)) {
-        try { dims.set(probePath, getVideoDimensions(probePath)) } catch { dims.set(probePath, null) }
+      if (!seg.filePath) continue
+      if (!dims.has(seg.filePath)) {
+        try { dims.set(seg.filePath, getVideoDimensions(seg.filePath)) } catch { dims.set(seg.filePath, null) }
       }
-      const d = dims.get(probePath)
+      const d = dims.get(seg.filePath)
       if (d && d.width > 0 && d.height > 0) { seg.srcWidth = d.width; seg.srcHeight = d.height }
     }
   }

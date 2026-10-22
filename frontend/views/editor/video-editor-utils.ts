@@ -194,7 +194,6 @@ export function clipLayerAt(
 export function isLayerClip(clip: TimelineClip): boolean {
   if (clip.type !== 'video' && clip.type !== 'image') return false
   if (clip.composite) return true
-  if (hasMotion(clip.motion)) return true
   if ((clip.opacity ?? 100) < 100) return true
   if (clip.opacityKeyframes && clip.opacityKeyframes.length > 0) return true
   const layer = clip.layer

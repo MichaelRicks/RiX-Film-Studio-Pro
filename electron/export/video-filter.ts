@@ -4,7 +4,7 @@ import {
 } from './timeline'
 import { ffmpegFilmLookChain, type ClipFilmLook } from '../../shared/film-looks'
 import { keyframeExpr } from './keyframe-expr'
-import { hasMotion, motionExprs } from '../../shared/clip-motion'
+import { hasMotion, motionExprs, type ClipMotion } from '../../shared/clip-motion'
 
 export interface ExportSubtitle {
   text: string; startTime: number; endTime: number;
@@ -384,6 +384,44 @@ function verticalTextMap(
 const escCommas = (expr: string): string => expr.replace(/,/g, '\\,')
 
 /**
+ * Zoom, pan and tilt as ONE sub-pixel warp (ffmpeg `perspective`). Each output corner
+ * is mapped to the source point it shows: centre + R(-angle) * (corner - centre -
+ * offset) / zoom, all in the input frame's own pixels. A resize plus an overlay would
+ * snap size and position to whole pixels, which makes a slow zoom step instead of glide.
+ *
+ * `local` is the clip-local clock in seconds as an expression. perspective has no `t`;
+ * its `in` counts frames from the first and is already 1 on that one, so callers pass
+ * `((in-1)/fps)` (plus any offset into the clip), on a stream already at `fps`.
+ */
+function motionWarpFilter(motion: readonly ClipMotion[], local: string, duration: number): string {
+  const m = motionExprs(motion, local, duration)
+  const dx = `(${m.dx})*W`
+  const dy = `(${m.dy})*H`
+  const cos = m.rotation ? `cos(${m.rotation})` : ''
+  const sin = m.rotation ? `sin(${m.rotation})` : ''
+  // `ex`/`ey` are the corner's offset from the centre.
+  const px = (ex: string, ey: string) => {
+    const qx = `(${ex}-${dx})/${m.scale}`
+    if (!m.rotation) return escCommas(`W/2+${qx}`)
+    const qy = `(${ey}-${dy})/${m.scale}`
+    return escCommas(`W/2+${cos}*${qx}+${sin}*${qy}`)
+  }
+  const py = (ex: string, ey: string) => {
+    const qy = `(${ey}-${dy})/${m.scale}`
+    if (!m.rotation) return escCommas(`H/2+${qy}`)
+    const qx = `(${ex}-${dx})/${m.scale}`
+    return escCommas(`H/2+${cos}*${qy}-${sin}*${qx}`)
+  }
+  const left = px('-W/2', '-H/2'), right = px('W/2', '-H/2')
+  const top = py('-W/2', '-H/2'), bottom = py('-W/2', 'H/2')
+  const leftB = px('-W/2', 'H/2'), rightB = px('W/2', 'H/2')
+  const topR = py('W/2', '-H/2'), bottomR = py('W/2', 'H/2')
+  return `perspective=x0='${left}':y0='${top}':x1='${right}':y1='${topR}'` +
+    `:x2='${leftB}':y2='${bottom}':x3='${rightB}':y3='${bottomR}'` +
+    ':interpolation=cubic:sense=source:eval=frame'
+}
+
+/**
  * Composite the layer clips (logos, graphics, PiP) over the flattened program.
  *
  * Each becomes its own input, sized to what it fills the frame at — the same
@@ -486,37 +524,8 @@ function buildOverlayLayers(
     // something to multiply.
     chain += 'format=rgba,'
     if (subpixel && motionStack) {
-      // Zoom, pan and tilt as one warp. The picture is centred on a transparent
-      // frame-sized canvas, then each output corner is mapped to the source point it
-      // shows: centre + R(-angle) * (corner - centre - offset) / zoom. `in` counts
-      // frames from the clip's first but is already 1 on the first frame, so
-      // (in-1)/fps is the clip-local clock (perspective has no `t`).
-      const m = motionExprs(motionStack, `((in-1)/${o.fps})`, dur)
-      const dx = `(${m.dx})*W`
-      const dy = `(${m.dy})*H`
-      const cos = m.rotation ? `cos(${m.rotation})` : ''
-      const sin = m.rotation ? `sin(${m.rotation})` : ''
-      // `ex`/`ey` are the corner's offset from the centre.
-      const px = (ex: string, ey: string) => {
-        const qx = `(${ex}-${dx})/${m.scale}`
-        if (!m.rotation) return escCommas(`W/2+${qx}`)
-        const qy = `(${ey}-${dy})/${m.scale}`
-        return escCommas(`W/2+${cos}*${qx}+${sin}*${qy}`)
-      }
-      const py = (ex: string, ey: string) => {
-        const qy = `(${ey}-${dy})/${m.scale}`
-        if (!m.rotation) return escCommas(`H/2+${qy}`)
-        const qx = `(${ex}-${dx})/${m.scale}`
-        return escCommas(`H/2+${cos}*${qy}-${sin}*${qx}`)
-      }
-      const left = px('-W/2', '-H/2'), right = px('W/2', '-H/2')
-      const top = py('-W/2', '-H/2'), bottom = py('-W/2', 'H/2')
-      const leftB = px('-W/2', 'H/2'), rightB = px('W/2', 'H/2')
-      const topR = py('W/2', '-H/2'), bottomR = py('W/2', 'H/2')
       chain += `pad=${fitW}:${fitH}:(ow-iw)/2:(oh-ih)/2:color=black@0,`
-      chain += `perspective=x0='${left}':y0='${top}':x1='${right}':y1='${topR}'`
-      chain += `:x2='${leftB}':y2='${bottom}':x3='${rightB}':y3='${bottomR}'`
-      chain += ':interpolation=cubic:sense=source:eval=frame'
+      chain += motionWarpFilter(motionStack, `((in-1)/${o.fps})`, dur)
     } else {
       // Animated size. eval=frame re-reads the expressions every frame; sizes are
       // forced even and at least 2px, because odd or zero dimensions trip scalers.
@@ -662,6 +671,8 @@ export function buildVideoFilterGraph(
         let chain = `[${idx}:v]${vertical ? `${buildReframeCrop(seg, seg.offsetInClip)},` : ''}scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:-1:-1:color=black,setsar=1`
         if (seg.flipH) chain += ',hflip'
         if (seg.flipV) chain += ',vflip'
+        // Already at the output fps, so the frame count is the clip clock.
+        if (hasMotion(seg.motion)) chain += `,${motionWarpFilter(seg.motion, `(${seg.offsetInClip.toFixed(6)}+(in-1)/${fps})`, seg.clipDuration)}`
         chain += buildGradingFilters(seg, seg.duration)
         chain += `[${contentLabel}]`
         filterParts.push(chain)
@@ -679,6 +690,14 @@ export function buildVideoFilterGraph(
         chain += `,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:-1:-1:color=black,setsar=1`
         if (seg.flipH) chain += ',hflip'
         if (seg.flipV) chain += ',vflip'
+        if (hasMotion(seg.motion)) {
+          // The warp reads time from the frame count, so this one segment is put on the
+          // output fps first, and cut to exactly the frames it should have (fps would
+          // otherwise drop its last one, and that would add up across clips).
+          const frames = Math.max(1, Math.round(seg.duration * fps))
+          chain += `,fps=${fps},tpad=stop_mode=clone:stop=2,trim=end_frame=${frames},setpts=PTS-STARTPTS`
+          chain += `,${motionWarpFilter(seg.motion, `(${seg.offsetInClip.toFixed(6)}+(in-1)/${fps})`, seg.clipDuration)}`
+        }
         chain += buildGradingFilters(seg, seg.duration)
         chain += `[${contentLabel}]`
         filterParts.push(chain)
