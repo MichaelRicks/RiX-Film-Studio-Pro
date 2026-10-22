@@ -22,9 +22,11 @@ export const isLibraryMusic = (clip: TimelineClip): boolean => clip.type === 'au
 /**
  * Auto-ducking as editable volume keyframes (see shared/music-ducking.ts). `apply` measures
  * the other audio on the timeline and writes the dips into each music clip's volume keyframes;
- * `remove` puts back what the clip had before. Neither runs on its own afterwards: moving
- * dialogue leaves the dips where they were until `apply` is run again, which is what keeps
- * keyframes dragged by hand from being overwritten behind the user's back.
+ * `remove` puts back what the clip had before, keeping the dips (with any hand edits) aside;
+ * `enable` brings those kept dips back, and only measures when there are none. None of it runs
+ * on its own afterwards: moving dialogue leaves the dips where they were until `apply` is run
+ * again, which is what keeps keyframes dragged by hand from being overwritten behind the
+ * user's back.
  */
 export function useMusicDucking() {
   const getState = useEditorGetState()
@@ -63,25 +65,49 @@ export function useMusicDucking() {
         const baseAt = (t: number) => volumeAtTime(base ?? undefined, t, clip.volume)
         return {
           id: clip.id,
-          duck: { enabled: true, amountDb: amount, base },
+          duck: { enabled: true, amountDb: amount, base, keys: null },
           volumeKeyframes: duckVolumeKeyframes(curve, clip.startTime, clip.duration, baseAt, amount, base?.map(k => k.t)),
         }
       })
     if (patches.length > 0) actions.setClipsDuckState(patches)
   }, [actions, getState])
 
-  /** Turn ducking off: the clip gets back the volume keyframes it had before. */
+  /** Turn ducking off: the clip gets back the volume keyframes it had before, and the dips
+   *  as they are now (hand edits included) are kept aside for `enable`. */
   const remove = useCallback((clipIds: string[]) => {
     const targets = new Set(clipIds)
     const patches = selectClips(getState())
-      .filter(clip => targets.has(clip.id) && clip.duck)
+      .filter(clip => targets.has(clip.id) && clip.duck?.enabled)
       .map(clip => ({
         id: clip.id,
-        duck: { enabled: false, amountDb: clip.duck!.amountDb, base: null },
-        volumeKeyframes: clip.duck!.enabled ? (clip.duck!.base ?? undefined) : clip.volumeKeyframes,
+        duck: {
+          enabled: false,
+          amountDb: clip.duck!.amountDb,
+          base: null,
+          keys: clip.volumeKeyframes?.length ? clip.volumeKeyframes : null,
+        },
+        volumeKeyframes: clip.duck!.base ?? undefined,
       }))
     if (patches.length > 0) actions.setClipsDuckState(patches)
   }, [actions, getState])
+
+  /** Turn ducking on: restore the dips the clip had when it was switched off, else measure
+   *  fresh ones. Clips that are already ducked are left alone. */
+  const enable = useCallback(async (clipIds: string[]) => {
+    const targets = new Set(clipIds)
+    const todo = selectClips(getState()).filter(clip => targets.has(clip.id) && clip.type === 'audio' && !clip.duck?.enabled)
+    const restorable = todo.filter(clip => clip.duck?.keys?.length)
+    if (restorable.length > 0) {
+      actions.setClipsDuckState(restorable.map(clip => ({
+        id: clip.id,
+        // What the clip has now is its un-ducked volume (it may have been changed while ducking was off).
+        duck: { enabled: true, amountDb: clip.duck!.amountDb, base: clip.volumeKeyframes?.length ? clip.volumeKeyframes : null, keys: null },
+        volumeKeyframes: clip.duck!.keys ?? undefined,
+      })))
+    }
+    const fresh = todo.filter(clip => !clip.duck?.keys?.length).map(clip => clip.id)
+    if (fresh.length > 0) await apply(fresh)
+  }, [actions, apply, getState])
 
   /** Ducking for the clip(s) just made from this asset, when they were added with ducking on. */
   const applyForAsset = useCallback((assetId: string) => {
@@ -91,5 +117,5 @@ export function useMusicDucking() {
     if (ids.length > 0) void apply(ids)
   }, [apply, getState])
 
-  return { apply, remove, applyForAsset }
+  return { apply, remove, enable, applyForAsset }
 }

@@ -398,11 +398,14 @@ export const timelineClipSchema = z.object({
   // Auto-ducking (shared/music-ducking.ts). While `enabled`, the clip's volumeKeyframes hold the dips
   // measured under other audio on the timeline, drawn and editable like any volume automation.
   // `base` is what volumeKeyframes was before ducking (null = a flat volume), restored when it is
-  // turned off and used as the starting level when the dips are recalculated.
+  // turned off and used as the starting level when the dips are recalculated. `keys` is the dips
+  // as the user last left them, kept while ducking is off so turning it back on restores their
+  // edits instead of measuring again.
   duck: z.object({
     enabled: z.boolean(),
     amountDb: z.number(),
     base: z.array(z.object({ t: z.number(), value: z.number() })).nullable().optional(),
+    keys: z.array(z.object({ t: z.number(), value: z.number() })).nullable().optional(),
   }).optional(),
   // A stack of them; projects saved with the original single preset load as a list of one.
   motion: z.preprocess(

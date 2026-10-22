@@ -247,7 +247,7 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
               setAutoDuckDefaultState(e.target.checked)
               setAutoDuckDefault(e.target.checked)
               const ids = musicOnTimeline.map(c => c.id)
-              if (e.target.checked) void ducking.apply(ids)
+              if (e.target.checked) void ducking.enable(ids)
               else ducking.remove(ids)
             }}
             className="rounded bg-zinc-800 border-zinc-600"

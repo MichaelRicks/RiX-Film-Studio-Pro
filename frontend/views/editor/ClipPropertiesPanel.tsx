@@ -850,7 +850,7 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
                 <input
                   type="checkbox"
                   checked={duck.enabled}
-                  onChange={(e) => { if (e.target.checked) void ducking.apply([selectedClip.id]); else ducking.remove([selectedClip.id]) }}
+                  onChange={(e) => { if (e.target.checked) void ducking.enable([selectedClip.id]); else ducking.remove([selectedClip.id]) }}
                   className="rounded bg-zinc-800 border-zinc-600"
                 />
                 <span className="text-sm text-zinc-300">Auto-duck under dialogue</span>
@@ -877,7 +877,7 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
                     Recalculate dips
                   </button>
                   <p className="mt-1 text-[10px] text-zinc-600 leading-snug">
-                    The dips are volume keyframes on the clip: drag them, add or remove them. Recalculate after moving dialogue (it replaces hand edits); unchecking restores the volume the clip had before.
+                    The dips are volume keyframes on the clip: drag them, add or remove them. Unchecking restores the volume the clip had before and keeps your dips for when you check it again. Recalculate after moving dialogue (it replaces hand edits).
                   </p>
                 </div>
               )}
