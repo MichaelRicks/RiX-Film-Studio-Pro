@@ -175,8 +175,8 @@ export function Project() {
   }
   
   const tabs: { id: ProjectTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'gen-space', label: 'Create', icon: <Sparkles className="h-4 w-4" /> },
-    { id: 'video-editor', label: 'Video Editor', icon: <Film className="h-4 w-4" /> },
+    { id: 'gen-space', label: 'Create', icon: <Sparkles className="h-3.5 w-3.5" /> },
+    { id: 'video-editor', label: 'Video Editor', icon: <Film className="h-3.5 w-3.5" /> },
   ]
   const shouldShowAssetMetadataMigrationProgressScreen = assetMetadataMigrationProgress.running
     || (upgradePassProjectId !== activeProjectId && needsAssetMetadataMigration)
@@ -249,7 +249,7 @@ export function Project() {
             <button
               key={tab.id}
               onClick={() => setCurrentTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
                 currentTab === tab.id
                   ? 'bg-zinc-800 text-white'
                   : 'text-zinc-400 hover:text-white'
@@ -272,23 +272,23 @@ export function Project() {
               setShowDirector(true)
             }}
             title="Have Claude cut a video from your assets (runs in your own Claude app)"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-white bg-[rgb(var(--accent)/0.85)] hover:bg-[rgb(var(--accent))] transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium text-white bg-[rgb(var(--accent)/0.85)] hover:bg-[rgb(var(--accent))] transition-colors"
           >
-            <Clapperboard className="h-4 w-4" />Edit with Claude
+            <Clapperboard className="h-3.5 w-3.5" />Edit with Claude
           </button>
           <button
             onClick={handleManualSave}
             title="Save the project now (it also autosaves continuously)"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           >
-            <Save className="h-4 w-4" />Save
+            <Save className="h-3.5 w-3.5" />Save
           </button>
           <button
             onClick={() => void handleExportProject()}
             title="Export this project to a file (for backup or moving to another computer)"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           >
-            <Download className="h-4 w-4" />Export
+            <Download className="h-3.5 w-3.5" />Export
           </button>
         </div>
       </header>

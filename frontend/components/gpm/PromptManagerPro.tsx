@@ -1891,7 +1891,7 @@ export function PromptManagerPro() {
     return (
       <button
         onClick={() => setPromptManagerProOpen(true)} title="Open Prompt Manager Pro"
-        className="fixed top-1/2 -translate-y-1/2 right-0 z-[75] flex flex-col items-center justify-center gap-1.5"
+        className="fixed top-1/2 -translate-y-1/2 right-0 z-[75] flex flex-col items-center justify-center gap-1.5 opacity-50 hover:opacity-100 focus-visible:opacity-100 transition-opacity"
         style={{ width: 24, height: 160, background: C.blue, color: '#fff', borderRadius: '8px 0 0 8px', boxShadow: '-3px 0 10px rgba(0,0,0,0.35)' }}
       >
         <ChevronRight size={16} style={{ transform: 'rotate(180deg)' }} />
