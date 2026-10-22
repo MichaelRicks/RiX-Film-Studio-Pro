@@ -75,6 +75,9 @@ interface FrameOverlayState {
   activeClip: TimelineClip | null
   crossDissolve: DissolvePair | null
   layerStack: TimelineClip[]
+  /** Layer videos about to start. Mounted early, hidden, so each has decoded its first
+   *  frame by its cut instead of starting cold (which showed as a black frame). */
+  upcomingLayers: TimelineClip[]
   activeTextClips: TimelineClip[]
   activeSubtitles: SubtitleClip[]
   activeLetterbox: ActiveLetterboxState | null
@@ -104,6 +107,8 @@ interface VideoContributorSyncState {
 
 const BASE_VIDEO_STYLE = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;z-index:0;pointer-events:none;'
 const VIDEO_POOL_PREROLL_SECONDS = 1.5
+/** Longest the outgoing frame is held at a cut while the incoming video gets ready. */
+const CUT_HOLD_MAX_MS = 400
 
 function resolveClipPathFromAssets(assets: Asset[], clip: TimelineClip): string {
   const proxyPath = (clip as { proxyPath?: string }).proxyPath
@@ -293,6 +298,18 @@ function getLayerStack(mediaClips: TimelineClip[], tracks: Track[], time: number
     .sort((a, b) => a.trackIndex - b.trackIndex)
 }
 
+function getUpcomingLayers(mediaClips: TimelineClip[], tracks: Track[], time: number): TimelineClip[] {
+  return mediaClips
+    .filter(clip =>
+      isLayerClip(clip) &&
+      clip.asset?.type === 'video' &&
+      tracks[clip.trackIndex]?.enabled !== false &&
+      clip.startTime > time &&
+      clip.startTime - time <= VIDEO_POOL_PREROLL_SECONDS
+    )
+    .sort((a, b) => a.startTime - b.startTime)
+}
+
 function getStyleOpacity(style: React.CSSProperties): number {
   if (typeof style.opacity === 'number') return style.opacity
   if (typeof style.opacity === 'string') {
@@ -427,6 +444,7 @@ function deriveFrameRenderState(cache: FrameRenderCache, tracks: Track[], time: 
     crossDissolve: dissolve?.pair ?? null,
     crossDissolveProgress: dissolve?.progress ?? 0,
     layerStack,
+    upcomingLayers: getUpcomingLayers(cache.mediaClips, tracks, effectiveTime),
     activeTextClips: getActiveTextClips(cache.textClips, tracks, time),
     activeSubtitles: getActiveSubtitles(cache.subtitles, tracks, time),
     activeLetterbox: getActiveLetterbox(cache.adjustmentClips, tracks, time),
@@ -463,6 +481,7 @@ function sameFrameOverlayState(a: FrameOverlayState, b: FrameOverlayState): bool
     a.activeClip === b.activeClip &&
     sameDissolve(a.crossDissolve, b.crossDissolve) &&
     sameClipList(a.layerStack, b.layerStack) &&
+    sameClipList(a.upcomingLayers, b.upcomingLayers) &&
     sameClipList(a.activeTextClips, b.activeTextClips) &&
     sameSubtitleList(a.activeSubtitles, b.activeSubtitles) &&
     sameLetterbox(a.activeLetterbox, b.activeLetterbox) &&
@@ -571,6 +590,9 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
   const activePoolClipIdRef = React.useRef<string | null>(null)
   const contributorSyncStatesRef = React.useRef<Map<string, VideoContributorSyncState>>(new Map())
   const preSeekDoneRef = React.useRef<string | null>(null)
+  // At a cut the outgoing element stays on screen until the incoming one has a frame
+  // to show, so the cut never flashes black. See applyFrameVisuals.
+  const cutHoldRef = React.useRef<{ path: string; since: number } | null>(null)
   const clipsRef = React.useRef(clips)
   const tracksRef = React.useRef(tracks)
   const getClipPathRef = React.useRef(getClipPath)
@@ -605,6 +627,7 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
       activeClip: initial.activeClip,
       crossDissolve: initial.crossDissolve,
       layerStack: initial.layerStack,
+      upcomingLayers: initial.upcomingLayers,
       activeTextClips: initial.activeTextClips,
       activeSubtitles: initial.activeSubtitles,
       activeLetterbox: initial.activeLetterbox,
@@ -672,6 +695,7 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
         activeClip: nextState.activeClip,
         crossDissolve: nextState.crossDissolve,
         layerStack: nextState.layerStack,
+        upcomingLayers: nextState.upcomingLayers,
         activeTextClips: nextState.activeTextClips,
         activeSubtitles: nextState.activeSubtitles,
         activeLetterbox: nextState.activeLetterbox,
@@ -723,9 +747,9 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
     video: HTMLVideoElement,
     clip: TimelineClip,
     atTime: number,
-    options: { forceSeek?: boolean; paused?: boolean },
+    options: { forceSeek?: boolean; paused?: boolean; skipIfAligned?: boolean },
   ) => {
-    const { forceSeek = false, paused = false } = options
+    const { forceSeek = false, paused = false, skipIfAligned = false } = options
     video.muted = true
     video.volume = 0
 
@@ -741,7 +765,12 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
     const driftThreshold = shouldPause ? 0.04 : 0.3
 
     video.playbackRate = clip.reversed ? 1 : clip.speed
-    if (!Number.isNaN(targetTime) && (forceSeek || Math.abs(video.currentTime - targetTime) > driftThreshold)) {
+    // Playback into a clip whose element the pre-roll already parked on its first
+    // frame: re-seeking it only puts it back into "seeking" and drops its frame, which
+    // is what flashed black at the cut.
+    const alignedAlready = skipIfAligned && !video.seeking && video.readyState >= 2
+      && Math.abs(video.currentTime - targetTime) < 0.05
+    if (!Number.isNaN(targetTime) && ((forceSeek && !alignedAlready) || Math.abs(video.currentTime - targetTime) > driftThreshold)) {
       if (!shouldPause && typeof (video as { fastSeek?: (time: number) => void }).fastSeek === 'function' && !forceSeek) {
         ;(video as { fastSeek: (time: number) => void }).fastSeek(targetTime)
       } else {
@@ -798,6 +827,7 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
     syncVideoElement(video, latestContributor.clip, atTime, {
       forceSeek: syncState.pendingHardSync,
       paused: latestMode !== 'playback' || latestContributor.clip.reversed,
+      skipIfAligned: latestMode === 'playback',
     })
 
     if (syncState.pendingHardSync) {
@@ -814,6 +844,9 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
       const src = resolveClipPathRef(contributor.clip)
       if (src) desiredSources.add(src)
     }
+
+    // The outgoing element of a cut still being shown must survive until it's released.
+    if (cutHoldRef.current) desiredSources.add(cutHoldRef.current.path)
 
     const activeVideoContributor = state.activeVideoContributors.find(contributor => contributor.target === 'active') ?? null
     if (mode === 'playback' && activeVideoContributor) {
@@ -874,8 +907,23 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
         const shouldForceSyncActive = mode === 'scrub' || isNewClip || hasPlaybackJump
         if (poolContainer && !video.parentElement) poolContainer.appendChild(video)
 
+        // A playback cut: keep the outgoing frame up until the incoming element has
+        // painted one. Revealing it straight away showed a black frame whenever it was
+        // still seeking or hadn't decoded yet. Never held for long, so a clip that
+        // can't load doesn't freeze the monitor.
+        if (clipPath !== previousPoolPath && mode === 'playback' && pool.has(previousPoolPath)) {
+          cutHoldRef.current = { path: previousPoolPath, since: performance.now() }
+        }
+        const hold = cutHoldRef.current
+        const incomingReady = video.readyState >= 2 && !video.seeking
+        if (hold && (mode !== 'playback' || incomingReady || performance.now() - hold.since > CUT_HOLD_MAX_MS || hold.path === clipPath || !pool.has(hold.path))) {
+          cutHoldRef.current = null
+        }
+        const holdPath = cutHoldRef.current?.path ?? null
+
         for (const [poolPath, pooledVideo] of pool) {
           if (poolPath === clipPath) continue
+          if (poolPath === holdPath) continue
           pooledVideo.style.opacity = '0'
           pooledVideo.style.zIndex = '0'
         }
@@ -883,8 +931,10 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
         if (clipPath !== previousPoolPath) {
           const oldVid = pool.get(previousPoolPath)
           if (oldVid) {
-            oldVid.style.opacity = '0'
-            oldVid.style.zIndex = '0'
+            if (previousPoolPath !== holdPath) {
+              oldVid.style.opacity = '0'
+              oldVid.style.zIndex = '0'
+            }
             oldVid.pause()
           }
           activePoolPathRef.current = clipPath
@@ -894,8 +944,18 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
           activePoolClipIdRef.current = activeVideoContributor.clip.id
           preSeekDoneRef.current = null
         }
-        video.style.opacity = '1'
-        video.style.zIndex = '1'
+        if (holdPath) {
+          video.style.opacity = '0'
+          video.style.zIndex = '0'
+          const heldVideo = pool.get(holdPath)
+          if (heldVideo) {
+            heldVideo.style.opacity = '1'
+            heldVideo.style.zIndex = '1'
+          }
+        } else {
+          video.style.opacity = '1'
+          video.style.zIndex = '1'
+        }
         if (shouldForceSyncActive) {
           contributorSyncState.pendingHardSync = true
         }
@@ -1387,7 +1447,7 @@ export const ProgramMonitor = React.forwardRef<ProgramMonitorHandle, ProgramMoni
                 <>
                   {/* Layers: graphics drawn OVER the active clip (z above the video
                       pool and the active image, below the transform box and titles). */}
-                  {layerStack.map(lowerClip => {
+                  {[...layerStack, ...frameScene.upcomingLayers.filter(c => !layerStack.includes(c))].map(lowerClip => {
                     const lowerPath = getClipPath(lowerClip) || lowerClip.asset?.path || ''
                     const lowerFileUrl = lowerPath ? pathToFileUrl(lowerPath) : ''
                     if (lowerClip.asset?.type === 'image' || lowerClip.type === 'image') {
