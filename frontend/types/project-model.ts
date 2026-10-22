@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { clampKeyframeStrength } from '../lib/keyframe-strength.ts'
+import { MOTION_PRESET_IDS } from '../../shared/clip-motion'
 
 export const generationModeValues = [
   'text-to-video',
@@ -393,6 +394,12 @@ export const timelineClipSchema = z.object({
   // correction above. Only the preset id and intensity are stored, so the recipe
   // stays in one place for the preview and the export to read.
   filmLook: z.object({ presetId: z.string(), intensity: z.number() }).optional(),
+  // Zoom / pan / shake preset (shared/clip-motion.ts), added on top of `layer`.
+  // A stack of them; projects saved with the original single preset load as a list of one.
+  motion: z.preprocess(
+    (v) => (v && !Array.isArray(v) ? [v] : v),
+    z.array(z.object({ preset: z.enum(MOTION_PRESET_IDS), strength: z.number(), speed: z.number() })),
+  ).optional(),
   opacity: z.number().default(100),
   takeIndex: z.number().optional(),
   isRegenerating: z.boolean().optional(),

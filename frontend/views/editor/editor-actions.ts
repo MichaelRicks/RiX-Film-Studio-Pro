@@ -1247,6 +1247,13 @@ export function setClipsFilmLook(state: EditorState, clipIds: string[], filmLook
   return mapClips(state, clip => (ids.has(clip.id) ? { ...clip, filmLook } : clip))
 }
 
+/** Sets (or clears) the stack of motion presets on several clips as one undo step. */
+export function setClipsMotion(state: EditorState, clipIds: string[], motion: TimelineClip['motion']): EditorState {
+  const ids = new Set(clipIds)
+  const next = motion && motion.length > 0 ? motion : undefined
+  return mapClips(state, clip => (ids.has(clip.id) ? { ...clip, motion: next } : clip))
+}
+
 export function setClipStartTime(state: EditorState, clipId: string, startTime: number): EditorState {
   return updateClip(state, clipId, { startTime: Math.max(0, startTime) })
 }

@@ -1,4 +1,5 @@
 import type { ClipFilmLook } from '../../shared/film-looks'
+import { hasMotion, type ClipMotion } from '../../shared/clip-motion'
 
 export interface ColorCorrection {
   brightness: number; contrast: number; saturation: number; temperature: number;
@@ -16,7 +17,7 @@ export interface ExportClip {
   volumeKeyframes?: { t: number; value: number }[];
   opacityKeyframes?: { t: number; value: number }[];
   reframe?: ClipReframe;
-  layer?: ClipLayer; composite?: boolean;
+  layer?: ClipLayer; composite?: boolean; motion?: ClipMotion[];
   fadeIn?: number; fadeOut?: number;
   colorCorrection?: ColorCorrection; filmLook?: ClipFilmLook;
   transitionIn?: ClipTransition; transitionOut?: ClipTransition;
@@ -44,6 +45,7 @@ export interface OverlayLayer {
   /** Fade up/down in seconds. Undefined = DEFAULT_LAYER_FADE, 0 = a hard cut. */
   fadeIn?: number; fadeOut?: number;
   layer: ClipLayer;
+  motion?: ClipMotion[];
   colorCorrection?: ColorCorrection; filmLook?: ClipFilmLook;
 }
 
@@ -67,12 +69,24 @@ const DEFAULT_LAYER: ClipLayer = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1 }
 export function isLayerExportClip(clip: ExportClip): boolean {
   if (clip.type !== 'video' && clip.type !== 'image') return false
   if (clip.composite) return true
+  if (hasMotion(clip.motion)) return true
   if ((clip.opacity ?? 100) < 100) return true
   if (clip.opacityKeyframes && clip.opacityKeyframes.length > 0) return true
   const layer = clip.layer
   if (!layer) return false
   if (layer.keys && layer.keys.length > 0) return true
   return layer.x !== 0.5 || layer.y !== 0.5 || layer.scaleX !== 1 || layer.scaleY !== 1
+}
+
+/** A clip that is a layer only because of its motion — a full-frame shot, not a graphic. */
+export function isMotionOnlyLayer(clip: ExportClip): boolean {
+  return hasMotion(clip.motion) && !isLayerExportClip({ ...clip, motion: undefined })
+}
+
+function motionFade(clip: ExportClip, transition: ClipTransition | undefined): number | undefined {
+  return isMotionOnlyLayer(clip) && transition?.type === 'fade-to-black' && transition.duration > 0
+    ? transition.duration
+    : undefined
 }
 
 /** The layer clips, bottom track first, so they stack the way the preview shows. */
@@ -91,9 +105,12 @@ export function collectOverlayLayers(clips: ExportClip[]): OverlayLayer[] {
       flipV: clip.flipV || false,
       opacity: clip.opacity ?? 100,
       opacityKeyframes: clip.opacityKeyframes,
-      fadeIn: clip.fadeIn,
-      fadeOut: clip.fadeOut,
+      // The layer path can't cross-fade, but over its black base a fade to black is
+      // just an alpha ramp, so keep that transition (the preview fades the same way).
+      fadeIn: clip.fadeIn ?? motionFade(clip, clip.transitionIn),
+      fadeOut: clip.fadeOut ?? motionFade(clip, clip.transitionOut),
       layer: clip.layer ?? DEFAULT_LAYER,
+      motion: clip.motion,
       colorCorrection: clip.colorCorrection,
       filmLook: clip.filmLook,
     }))
@@ -112,6 +129,9 @@ export interface FlatSegment {
   reframe?: ClipReframe;
   /** Source pixel size — filled in by the exporter for 9:16 exports (title mapping). */
   srcWidth?: number; srcHeight?: number;
+  /** A black 'gap' standing in for a motion clip, which is drawn over it as a layer:
+   *  the clip's file, probed for its size by a vertical export. */
+  placeholderPath?: string;
   colorCorrection?: ColorCorrection; filmLook?: ClipFilmLook;
   transitionIn?: ClipTransition; transitionOut?: ClipTransition;
   // Position of this segment within its ORIGINAL clip's own timeline (not the
@@ -131,7 +151,11 @@ export function flattenTimeline(clips: ExportClip[]): FlatSegment[] {
   // those are composited on top afterwards (see collectOverlayLayers), so the clip
   // BELOW a layer has to keep the frame for that whole span rather than being
   // replaced by it.
-  const videoClips = clips.filter(c => (c.type === 'video' || c.type === 'image') && !isLayerExportClip(c))
+  // The exception is a clip that is a layer ONLY because it has motion: it fills the
+  // frame like any shot, so it still takes its place in the program (highest track
+  // wins, the timeline keeps its length) — as black, with the moving picture drawn
+  // over it as a layer.
+  const videoClips = clips.filter(c => (c.type === 'video' || c.type === 'image') && (!isLayerExportClip(c) || isMotionOnlyLayer(c)))
   if (videoClips.length === 0) return []
 
   // Collect all time boundaries
@@ -157,7 +181,18 @@ export function flattenTimeline(clips: ExportClip[]): FlatSegment[] {
       .filter(c => mid >= c.startTime && mid < c.startTime + c.duration)
       .sort((a, b) => b.trackIndex - a.trackIndex)
 
-    if (active.length > 0) {
+    if (active.length > 0 && isMotionOnlyLayer(active[0])) {
+      const c = active[0]
+      // Black base for the layer pass. It keeps the clip's reframe and source path so a
+      // vertical export can still find the 9:16 window the moving picture sits in.
+      segments.push({
+        filePath: '', type: 'gap', startTime: t0, duration: segDur, trimStart: 0,
+        speed: 1, reversed: false, flipH: false, flipV: false, opacity: 100,
+        muted: true, volume: 0,
+        reframe: c.reframe, placeholderPath: c.path,
+        offsetInClip: 0, clipDuration: 0,
+      })
+    } else if (active.length > 0) {
       const c = active[0]
       const offsetInClip = t0 - c.startTime
       segments.push({

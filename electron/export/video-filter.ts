@@ -4,6 +4,7 @@ import {
 } from './timeline'
 import { ffmpegFilmLookChain, type ClipFilmLook } from '../../shared/film-looks'
 import { keyframeExpr } from './keyframe-expr'
+import { hasMotion, motionExprs } from '../../shared/clip-motion'
 
 export interface ExportSubtitle {
   text: string; startTime: number; endTime: number;
@@ -423,9 +424,27 @@ function buildOverlayLayers(
     // Clip-local clock, so the keys read the same as they do in the editor.
     const local = `(t-${startAt.toFixed(6)})`
     type LayerField = 'x' | 'y' | 'scaleX' | 'scaleY'
-    const expr = (field: LayerField): string => keys && keys.length > 1
+    const baseExpr = (field: LayerField): string => keys && keys.length > 1
       ? keyframeExpr(keys.map(k => ({ t: k.t, v: k[field] })), local)
       : (keys ? keys[0][field] : ly.layer[field]).toFixed(6)
+    // Zoom / pan / shake rides on top of the layer's own placement: offsets add to
+    // the centre, the zoom multiplies the size (see motionAt in the renderer).
+    // A motion clip with no placement of its own is warped in ONE sub-pixel pass (see
+    // below). Scale + overlay snap size and position to whole pixels, which is
+    // invisible on a shake but makes a slow zoom or pan step instead of glide.
+    const motionStack = hasMotion(ly.motion) ? ly.motion : null
+    const subpixel = motionStack !== null && !keys
+      && ly.layer.x === 0.5 && ly.layer.y === 0.5 && ly.layer.scaleX === 1 && ly.layer.scaleY === 1
+    // Rotation exists only in the sub-pixel warp: a clip that also carries its own
+    // placement keeps the whole-pixel path, where a tilt is not applied.
+    const motion = motionStack && !subpixel ? motionExprs(motionStack, local, dur) : null
+    const expr = (field: LayerField): string => {
+      const base = baseExpr(field)
+      if (!motion) return base
+      if (field === 'x') return `(${base})+${motion.dx}`
+      if (field === 'y') return `(${base})+${motion.dy}`
+      return `(${base})*${motion.scale}`
+    }
 
     // The frame the layer sits on. A vertical export only shows the 9:16 window of
     // that frame, so fit into the larger virtual frame the window crops from — the
@@ -466,10 +485,44 @@ function buildOverlayLayers(
     // rgba so a logo's own transparency survives, and so the alpha gain below has
     // something to multiply.
     chain += 'format=rgba,'
-    // Animated size. eval=frame re-reads the expressions every frame; sizes are
-    // forced even and at least 2px, because odd or zero dimensions trip scalers.
-    chain += `scale=w='trunc(max(2\\,iw*(${escCommas(expr('scaleX'))}))/2)*2'`
-    chain += `:h='trunc(max(2\\,ih*(${escCommas(expr('scaleY'))}))/2)*2':eval=frame`
+    if (subpixel && motionStack) {
+      // Zoom, pan and tilt as one warp. The picture is centred on a transparent
+      // frame-sized canvas, then each output corner is mapped to the source point it
+      // shows: centre + R(-angle) * (corner - centre - offset) / zoom. `in` counts
+      // frames from the clip's first but is already 1 on the first frame, so
+      // (in-1)/fps is the clip-local clock (perspective has no `t`).
+      const m = motionExprs(motionStack, `((in-1)/${o.fps})`, dur)
+      const dx = `(${m.dx})*W`
+      const dy = `(${m.dy})*H`
+      const cos = m.rotation ? `cos(${m.rotation})` : ''
+      const sin = m.rotation ? `sin(${m.rotation})` : ''
+      // `ex`/`ey` are the corner's offset from the centre.
+      const px = (ex: string, ey: string) => {
+        const qx = `(${ex}-${dx})/${m.scale}`
+        if (!m.rotation) return escCommas(`W/2+${qx}`)
+        const qy = `(${ey}-${dy})/${m.scale}`
+        return escCommas(`W/2+${cos}*${qx}+${sin}*${qy}`)
+      }
+      const py = (ex: string, ey: string) => {
+        const qy = `(${ey}-${dy})/${m.scale}`
+        if (!m.rotation) return escCommas(`H/2+${qy}`)
+        const qx = `(${ex}-${dx})/${m.scale}`
+        return escCommas(`H/2+${cos}*${qy}-${sin}*${qx}`)
+      }
+      const left = px('-W/2', '-H/2'), right = px('W/2', '-H/2')
+      const top = py('-W/2', '-H/2'), bottom = py('-W/2', 'H/2')
+      const leftB = px('-W/2', 'H/2'), rightB = px('W/2', 'H/2')
+      const topR = py('W/2', '-H/2'), bottomR = py('W/2', 'H/2')
+      chain += `pad=${fitW}:${fitH}:(ow-iw)/2:(oh-ih)/2:color=black@0,`
+      chain += `perspective=x0='${left}':y0='${top}':x1='${right}':y1='${topR}'`
+      chain += `:x2='${leftB}':y2='${bottom}':x3='${rightB}':y3='${bottomR}'`
+      chain += ':interpolation=cubic:sense=source:eval=frame'
+    } else {
+      // Animated size. eval=frame re-reads the expressions every frame; sizes are
+      // forced even and at least 2px, because odd or zero dimensions trip scalers.
+      chain += `scale=w='trunc(max(2\\,iw*(${escCommas(expr('scaleX'))}))/2)*2'`
+      chain += `:h='trunc(max(2\\,ih*(${escCommas(expr('scaleY'))}))/2)*2':eval=frame`
+    }
     filterLines.push(`${chain}[${source}]`)
     idx++
 
@@ -479,8 +532,10 @@ function buildOverlayLayers(
     // reaches full opacity.
     const okeys = ly.opacityKeyframes && ly.opacityKeyframes.length > 0 ? ly.opacityKeyframes : null
     const half = dur / 2
-    const fadeIn = Math.min(ly.fadeIn ?? defaultLayerFade(ly.type), half)
-    const fadeOut = Math.min(ly.fadeOut ?? defaultLayerFade(ly.type), half)
+    // A shot with motion fills the frame; it must not fade up from black like a logo.
+    const dfltFade = motionStack ? 0 : defaultLayerFade(ly.type)
+    const fadeIn = Math.min(ly.fadeIn ?? dfltFade, half)
+    const fadeOut = Math.min(ly.fadeOut ?? dfltFade, half)
     const opacityAt = (programT: number): number => {
       const l = programT - startAt
       let g = 1

@@ -10,6 +10,7 @@ import type {
 } from '../../types/project-model'
 import { DEFAULT_CLIP_LAYER, DEFAULT_COLOR_CORRECTION } from '../../types/project-model'
 import { filmLookFilterId } from '../../components/FilmLookDefs'
+import { hasMotion, motionAt } from '../../../shared/clip-motion'
 
 // ── Tool types & definitions ────────────────────────────────────────
 
@@ -128,11 +129,12 @@ export function linearKeyframeValue(keys: { t: number; value: number }[], t: num
  * this in the layer's alpha.
  */
 export function layerFadeMultiplier(
-  clip: { type?: string; duration: number; fadeIn?: number; fadeOut?: number },
+  clip: { type?: string; duration: number; fadeIn?: number; fadeOut?: number; motion?: readonly unknown[] },
   timeInClip: number,
 ): number {
   const half = clip.duration / 2
-  const dflt = defaultLayerFade(clip.type)
+  // A shot with motion still fills the frame, so it doesn't fade up like a logo.
+  const dflt = clip.motion && clip.motion.length > 0 ? 0 : defaultLayerFade(clip.type)
   const fin = Math.min(clip.fadeIn ?? dflt, half)
   const fout = Math.min(clip.fadeOut ?? dflt, half)
   let g = 1
@@ -192,6 +194,7 @@ export function clipLayerAt(
 export function isLayerClip(clip: TimelineClip): boolean {
   if (clip.type !== 'video' && clip.type !== 'image') return false
   if (clip.composite) return true
+  if (hasMotion(clip.motion)) return true
   if ((clip.opacity ?? 100) < 100) return true
   if (clip.opacityKeyframes && clip.opacityKeyframes.length > 0) return true
   const layer = clip.layer
@@ -566,10 +569,31 @@ export function getClipEffectStyles(clip: TimelineClip, timeInClip?: number): Re
   // than reflecting it across the frame. translate is in percentages of the
   // element, which is the full frame, matching x/y being fractions of the frame.
   let transformOrigin: string | undefined
-  if (clip.layer && timeInClip !== undefined) {
-    const { x, y, scaleX, scaleY } = clipLayerAt(clip, timeInClip)
+  if ((clip.layer || hasMotion(clip.motion)) && timeInClip !== undefined) {
+    let { x, y, scaleX, scaleY } = clipLayerAt(clip, timeInClip)
+    let rotate = 0
+    if (hasMotion(clip.motion)) {
+      const m = motionAt(clip.motion, timeInClip, clip.duration)
+      x += m.dx
+      y += m.dy
+      scaleX *= m.scale
+      scaleY *= m.scale
+      // The export turns the picture only while the clip has no placement of its own
+      // (see the sub-pixel path in buildOverlayLayers), so the preview does the same.
+      const placed = Boolean(clip.layer) && (
+        (clip.layer!.keys?.length ?? 0) > 0
+        || clip.layer!.x !== 0.5 || clip.layer!.y !== 0.5 || clip.layer!.scaleX !== 1 || clip.layer!.scaleY !== 1
+      )
+      rotate = placed ? 0 : m.rotate
+    }
     if (x !== 0.5 || y !== 0.5) {
       transforms.push(`translate(${((x - 0.5) * 100).toFixed(4)}%, ${((y - 0.5) * 100).toFixed(4)}%)`)
+    }
+    // Between the move and the scale, so a stretched picture is turned as a whole
+    // rather than sheared.
+    if (rotate !== 0) {
+      transforms.push(`rotate(${rotate.toFixed(4)}deg)`)
+      transformOrigin = 'center'
     }
     if (scaleX !== 1 || scaleY !== 1) {
       transforms.push(`scale(${scaleX.toFixed(5)}, ${scaleY.toFixed(5)})`)

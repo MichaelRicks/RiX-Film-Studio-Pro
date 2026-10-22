@@ -5,16 +5,18 @@
  */
 
 import { useMemo } from 'react'
-import { Film } from 'lucide-react'
+import { Film, Move } from 'lucide-react'
 import { FILM_LOOKS_BY_ID } from '../../../shared/film-looks'
+import { MOTION_PRESETS_BY_ID } from '../../../shared/clip-motion'
 import type { ClipFilmLook } from '../../../shared/film-looks'
 import { pathToFileUrl } from '../../lib/file-url'
 import { selectAssets, selectClips, selectSelectedClipIds } from './editor-selectors'
 import { useEditorActions, useEditorStore } from './editor-store'
 import { FilmLookPicker } from './FilmLookPicker'
+import { MotionPicker } from './MotionPicker'
 
 export function FiltersPanel() {
-  const { setClipsFilmLook } = useEditorActions()
+  const { setClipsFilmLook, setClipsMotion } = useEditorActions()
   const assets = useEditorStore(selectAssets)
   const clips = useEditorStore(selectClips)
   const selectedIds = useEditorStore(selectSelectedClipIds)
@@ -35,7 +37,11 @@ export function FiltersPanel() {
 
   const activeLookName = first?.filmLook ? FILM_LOOKS_BY_ID.get(first.filmLook.presetId)?.name ?? null : null
 
-  const applyToSelection = (next: ClipFilmLook | undefined) => {
+  const activeMotionName = first?.motion?.length
+    ? first.motion.map(m => MOTION_PRESETS_BY_ID.get(m.preset)?.name ?? m.preset).join(' + ')
+    : null
+
+  const applyToSelection =(next: ClipFilmLook | undefined) => {
     if (targets.length === 0) return
     setClipsFilmLook(targets.map(c => c.id), next)
   }
@@ -75,6 +81,22 @@ export function FiltersPanel() {
               thumbnailUrl={thumbnailUrl}
               onChange={applyToSelection}
               onApplyToAll={applyToAllClips}
+            />
+          </div>
+        </section>
+
+        <section>
+          <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-zinc-400">
+            <Move className="h-3.5 w-3.5" />
+            Motion
+            {activeMotionName && (
+              <span className="ml-auto text-[10px] font-normal text-zinc-500 truncate max-w-[140px]">{activeMotionName}</span>
+            )}
+          </div>
+          <div className={targets.length === 0 ? 'opacity-50 pointer-events-none' : undefined}>
+            <MotionPicker
+              value={first?.motion}
+              onChange={(next) => targets.length > 0 && setClipsMotion(targets.map(c => c.id), next)}
             />
           </div>
         </section>

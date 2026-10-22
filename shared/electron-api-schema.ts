@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MOTION_PRESET_IDS } from './clip-motion'
 
 const fileFilter = z.object({ name: z.string(), extensions: z.array(z.string()) })
 
@@ -70,6 +71,8 @@ const exportClip = z.object({
   fadeOut: z.number().optional(),
   colorCorrection: exportColorCorrection.optional(),
   filmLook: z.object({ presetId: z.string(), intensity: z.number() }).optional(),
+  // Stack of zoom / pan / shake / tilt presets (shared/clip-motion.ts). Makes the clip a layer.
+  motion: z.array(z.object({ preset: z.enum(MOTION_PRESET_IDS), strength: z.number(), speed: z.number() })).optional(),
   transitionIn: exportClipTransition.optional(),
   transitionOut: exportClipTransition.optional(),
 })
