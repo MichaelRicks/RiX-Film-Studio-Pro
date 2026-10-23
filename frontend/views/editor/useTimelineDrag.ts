@@ -3,7 +3,7 @@ import type { Asset, TimelineClip, Track } from '../../types/project-model'
 import { resolveOverlaps, migrateClip, type ToolType } from './video-editor-utils'
 import { buildAssetFromPath, isDroppedMediaEvent, readDroppedMediaAsset } from './dropped-media-asset'
 import { MUSIC_DND, type MusicDragPayload } from './music-settings'
-import { resolveSnap, snapDropStart, type SnapLock } from './timeline-snap'
+import { beatSnapTimes, resolveSnap, snapDropStart, type SnapLock } from './timeline-snap'
 import { withMeasuredDurations } from './measure-asset'
 
 interface DragPreviewPosition {
@@ -470,6 +470,8 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
         if (origPositions[otherClip.id]) continue
         targets.push(otherClip.startTime, otherClip.startTime + otherClip.duration)
       }
+      // Holding Alt also snaps to the beats of music clips that are not being moved.
+      if (e.altKey) targets.push(...beatSnapTimes(clips, new Set(Object.keys(origPositions))))
       const snapped = resolveSnap({
         start: newStartTime,
         edgeOffsets: [0, primaryClip.duration],
@@ -841,6 +843,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
           if (otherClip.id === clip.id) continue
           targets.push(otherClip.startTime, otherClip.startTime + otherClip.duration)
         }
+        if (e.altKey) targets.push(...beatSnapTimes(clips, new Set([clip.id])))
         const snapped = resolveSnap({
           start: newStartTime, edgeOffsets: [0], targets, pixelsPerSecond, lock: snapLockRef.current,
         })
@@ -879,6 +882,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
           if (otherClip.id === clip.id) continue
           targets.push(otherClip.startTime, otherClip.startTime + otherClip.duration)
         }
+        if (e.altKey) targets.push(...beatSnapTimes(clips, new Set([clip.id])))
         const snapped = resolveSnap({
           start: clip.startTime + newDuration, edgeOffsets: [0], targets, pixelsPerSecond, lock: snapLockRef.current,
         })
@@ -1081,7 +1085,7 @@ export function useTimelineDrag(params: UseTimelineDragParams) {
         const x = e.clientX - rect.left + trackContainerRef.current.scrollLeft
         const startTime = Math.max(0, x / pixelsPerSecond)
         void buildAssetFromPath(song.path, false, currentProjectId, song.title, true)
-          .then((asset) => addMusicToTimeline({ ...asset, prompt: `Music: ${song.title}`, resolution: 'music' }, startTime, trackIndex))
+          .then((asset) => addMusicToTimeline({ ...asset, prompt: `Music: ${song.title}`, resolution: 'music', ...(song.beats?.length ? { beats: song.beats } : {}) }, startTime, trackIndex))
       } catch { /* malformed drag payload */ }
       return
     }

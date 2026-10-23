@@ -320,6 +320,9 @@ export const assetSchema = z.object({
   renderMs: z.number().optional(),
   // Set on a solid-color still made by Add Color Matte; the color it was painted.
   matteColor: z.string().optional(),
+  // Beat times of a song from the MUSIC tab, in seconds from the start of the file (see
+  // scripts/music/update-catalogue.py). Drawn on the clip, and snapped to while Alt is held.
+  beats: z.array(z.number()).optional(),
 })
 
 /** Where a media clip sits in the frame and how big it is. `x`/`y` are the

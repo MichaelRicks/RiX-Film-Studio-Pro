@@ -670,10 +670,20 @@ export const electronAPISchemas = {
         energy: z.enum(['low', 'medium', 'high', 'unknown']),
         seconds: z.number(),
         bpm: z.number(),
+        beats: z.array(z.number()),
         reviewNote: z.string(),
+        /** In the music folder, or only in the downloadable song pack. */
+        local: z.boolean(),
+        remote: z.string(),
+        bytes: z.number(),
       })),
     }),
   },
+  // Adds songs the published pack has that the catalogue lacks; offline is not an error.
+  musicLibSync: { input: z.object({}), output: z.object({ online: z.boolean(), added: z.number() }) },
+  musicLibDownload: { input: z.object({ id: z.string() }), output: ipcResult({ path: z.string() }) },
+  // Copies songs into the music folder and lists them in the catalogue. No paths = ask with a file picker.
+  musicLibImport: { input: z.object({ paths: z.array(z.string()).optional() }), output: ipcResult({ added: z.number(), skipped: z.number() }) },
   musicLibChooseRoot: { input: z.object({}), output: z.object({ root: z.string().nullable() }) },
   musicLibResetRoot: { input: z.object({}), output: z.object({ root: z.string() }) },
   musicLibReveal: { input: z.object({}), output: emptyResult },

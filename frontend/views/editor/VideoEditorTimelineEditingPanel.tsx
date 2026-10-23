@@ -26,7 +26,8 @@ import type { GenerationError } from '../../lib/generation-errors'
 import { addVisualAssetToProject } from '../../lib/asset-copy'
 import { GPM_IMAGE_DND_TYPE } from '../../components/gpm/gpm-image-file'
 import { FILE_DND } from '../../components/gpm/DownloadsBrowser'
-import { MUSIC_DND, defaultMusicDuck } from './music-settings'
+import { MUSIC_DND, defaultMusicDuck, getFitDefault, isMusicTrackName } from './music-settings'
+import { clipBeatTimes } from './timeline-snap'
 import { useMusicDucking } from './useMusicDucking'
 import { GapGenerationModal } from './GapGenerationModal'
 import { ClipContextMenu, type ClipContextMenuState } from './ClipContextMenu'
@@ -391,7 +392,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   }, [actions])
 
   const addMusicToTimeline = useCallback((asset: Asset, startTime: number, preferredTrackIndex: number) => {
-    actions.addAudioAssetOnFreeTrack({ asset, startTime, preferredTrackIndex, duck: defaultMusicDuck() })
+    actions.addAudioAssetOnFreeTrack({ asset, startTime, preferredTrackIndex, duck: defaultMusicDuck(), fitToProgram: getFitDefault() })
     ducking.applyForAsset(asset.id)
   }, [actions, ducking])
 
@@ -449,6 +450,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   const trimFlyoutOpenedRef = useRef(false)
 
   const [timelineContextMenu, setTimelineContextMenu] = useState<TimelineMenuState>(null)
+  const [gapMenu, setGapMenu] = useState<{ x: number; y: number; gap: NonNullable<GapSelection> } | null>(null)
   const timelineContextMenuRef = useRef<HTMLDivElement>(null)
   const [clipContextMenu, setClipContextMenu] = useState<ClipContextMenuState | null>(null)
   const clipContextMenuRef = useRef<HTMLDivElement>(null)
@@ -539,16 +541,19 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   gapGenerateModeRef.current = gapGenerateMode
   gapGenerateModeRefBridge.current = gapGenerateMode
 
-  const closeGap = useCallback((gap: NonNullable<GapSelection>) => {
+  /** Slides what follows a gap left to close it: on every track (ripple), or only on the gap's own track. */
+  const closeGap = useCallback((gap: NonNullable<GapSelection>, scope: 'all' | 'track' = 'all') => {
     const gapDuration = gap.endTime - gap.startTime
 
     setClips(prev => prev.map(clip => {
+      if (scope === 'track' && clip.trackIndex !== gap.trackIndex) return clip
       if (clip.startTime >= gap.endTime) {
         return { ...clip, startTime: Math.max(0, clip.startTime - gapDuration) }
       }
       return clip
     }))
     setSubtitles(prev => prev.map(subtitle => {
+      if (scope === 'track' && subtitle.trackIndex !== gap.trackIndex) return subtitle
       if (subtitle.startTime >= gap.endTime) {
         return {
           ...subtitle,
@@ -823,8 +828,9 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
     const gap = selectedGapRef.current
     if (!gap) return
     clearSelectedGap()
-    closeGap(gap)
-  }, [clearSelectedGap, closeGap])
+    // Music is not tied to the picture, so closing its gap must not drag the video along with it.
+    closeGap(gap, isMusicTrackName(tracks[gap.trackIndex]?.name ?? '') ? 'track' : 'all')
+  }, [clearSelectedGap, closeGap, tracks])
   closeSelectedGapRefBridge.current = closeSelectedGap
 
   useEffect(() => {
@@ -1417,6 +1423,15 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
   }
 
   useEffect(() => {
+    if (!gapMenu) return
+    const close = () => setGapMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', onKey) }
+  }, [gapMenu])
+
+  useEffect(() => {
     if (!timelineContextMenu) return
     const handler = () => setTimelineContextMenu(null)
     window.addEventListener('click', handler)
@@ -1755,12 +1770,19 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                   onChange={(e) => setRenameValue(e.target.value)}
                   onBlur={handleFinishRename}
                   onKeyDown={(e) => {
+                    e.stopPropagation()
                     if (e.key === 'Enter') handleFinishRename()
                     if (e.key === 'Escape') { setRenamingTimelineId(null); setRenameValue('') }
                   }}
                   className="bg-transparent border-b border-blue-500 outline-none text-white text-xs w-20"
                   autoFocus
+                  onFocus={(e) => e.currentTarget.select()}
                   onClick={(e) => e.stopPropagation()}
+                  // A double-click here selects a word; without this it also reached the tab's own
+                  // double-click (start rename), which reset the field and threw the selection away.
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => e.stopPropagation()}
                 />
               ) : (
                 <span className="truncate max-w-[120px]">{tl.name}</span>
@@ -1806,6 +1828,8 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
               <button
                 onClick={() => {
                   const tl = timelines.find(t => t.id === timelineContextMenu.timelineId)
+                  // Clicks inside this menu are kept from the window handler that closes it, so close it here.
+                  setTimelineContextMenu(null)
                   if (tl) handleStartRename(tl.id, tl.name, 'panel')
                 }}
                 className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2"
@@ -1814,7 +1838,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                 Rename
               </button>
               <button
-                onClick={() => handleDuplicateTimeline(timelineContextMenu.timelineId)}
+                onClick={() => { setTimelineContextMenu(null); handleDuplicateTimeline(timelineContextMenu.timelineId) }}
                 className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 flex items-center gap-2"
               >
                 <Copy className="h-3 w-3" />
@@ -3049,6 +3073,23 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                             }}
                           />
 
+                          {/* The song's beats, as small ticks along the bottom edge. Skipped when they
+                              would sit closer than a few pixels. Hold Alt while dragging or trimming
+                              a clip to snap its edges to them. */}
+                          {(() => {
+                            const beats = clipBeatTimes(clip)
+                            if (beats.length < 2) return null
+                            const gapPx = ((beats[beats.length - 1] - beats[0]) / (beats.length - 1)) * pixelsPerSecond
+                            if (gapPx < 6) return null
+                            const h = getTrackHeight(clip.trackIndex) - 8
+                            const path = beats.map(t => `M${((t - clip.startTime) * pixelsPerSecond).toFixed(1)} ${h - 9}V${h}`).join('')
+                            return (
+                              <svg className="absolute inset-0 pointer-events-none" width={clipWidthPx} height={h} style={{ overflow: 'visible' }}>
+                                <path d={path} stroke="rgba(255,255,255,0.5)" strokeWidth={1} fill="none" />
+                              </svg>
+                            )
+                          })()}
+
                           {/* Volume line + automation keyframes. Flat = drag for gain,
                               double-click to start keyframing. Keyframed = a polyline
                               with draggable dots; double-click a dot removes it, the
@@ -3458,6 +3499,7 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
                           e.stopPropagation()
                           if (isGeneratingHere) return
                           selectGap(gap, e.currentTarget as HTMLElement)
+                          if (tracks[gap.trackIndex]?.kind === 'audio') setGapMenu({ x: e.clientX, y: e.clientY, gap })
                         }}
                       >
                         {isGeneratingHere ? (
@@ -4081,6 +4123,34 @@ export function VideoEditorTimelineEditingPanel(props: VideoEditorTimelineEditin
           copyFadesForward={copyFadesForward}
           clearFadesForward={clearClipFadesForward}
         />
+      )}
+
+      {/* Gap menu for audio tracks (video-track gaps use the generation panel). */}
+      {gapMenu && (
+        <div
+          className="fixed bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl py-1 z-50 min-w-[220px]"
+          style={{ left: gapMenu.x, top: gapMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="px-3 py-1 text-[10px] text-zinc-500">
+            {(gapMenu.gap.endTime - gapMenu.gap.startTime).toFixed(1)}s gap on {tracks[gapMenu.gap.trackIndex]?.name ?? 'this track'}
+          </div>
+          <button
+            onClick={() => { const g = gapMenu.gap; setGapMenu(null); clearSelectedGap(); closeGap(g, 'track') }}
+            className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+            title="Slides the clips after the gap on this track left. Other tracks stay where they are."
+          >
+            Close gap on this track
+          </button>
+          <button
+            onClick={() => { const g = gapMenu.gap; setGapMenu(null); clearSelectedGap(); closeGap(g, 'all') }}
+            className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
+            title="Ripple delete: slides everything after the gap, on every track, left."
+          >
+            Close gap on all tracks (ripple)
+          </button>
+        </div>
       )}
       {selectedGap && tracks[selectedGap.trackIndex]?.kind !== 'audio' && (
         <GapGenerationModal

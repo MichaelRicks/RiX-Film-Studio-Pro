@@ -146,9 +146,10 @@ export function VideoEditorTimelineControlPanel(props: VideoEditorTimelineContro
                   ? 'bg-blue-600/20 border border-blue-500/40'
                   : 'hover:bg-zinc-800 border border-transparent'
               }`}
-              draggable={!isActive}
+              // A row being renamed must not be draggable: dragging is what text selection in its field needs.
+              draggable={!isActive && !item.isRenaming}
               onDragStart={(e) => {
-                if (isActive) { e.preventDefault(); return }
+                if (isActive || item.isRenaming) { e.preventDefault(); return }
                 e.dataTransfer.setData('timeline', JSON.stringify({ id: tl.id, name: tl.name }))
                 e.dataTransfer.effectAllowed = 'copy'
               }}
@@ -165,13 +166,17 @@ export function VideoEditorTimelineControlPanel(props: VideoEditorTimelineContro
                     onChange={(e) => setRenameValue(e.target.value)}
                     onBlur={handleFinishRename}
                     onKeyDown={(e) => {
+                      e.stopPropagation()
                       if (e.key === 'Enter') handleFinishRename()
                       if (e.key === 'Escape') { setRenamingTimelineId(null); setRenameValue('') }
                     }}
                     className="bg-zinc-900 border border-blue-500 rounded px-1 py-0.5 outline-none text-white text-xs w-full"
                     autoFocus
+                    onFocus={(e) => e.currentTarget.select()}
                     onClick={(e) => e.stopPropagation()}
                     onDoubleClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onContextMenu={(e) => e.stopPropagation()}
                   />
                 ) : (
                   <p className={`text-xs font-medium truncate ${isActive ? 'text-white' : 'text-zinc-300'}`}>

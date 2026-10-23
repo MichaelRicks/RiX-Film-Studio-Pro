@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveSnap, snapDropStart, SNAP_ENGAGE_PX, SNAP_RELEASE_PX } from './timeline-snap.ts'
+import { beatSnapTimes, clipBeatTimes, resolveSnap, snapDropStart, SNAP_ENGAGE_PX, SNAP_RELEASE_PX } from './timeline-snap.ts'
 
 const PPS = 100 // 1 px = 0.01 s
 
@@ -74,5 +74,39 @@ describe('snapDropStart', () => {
   it('keeps the reach in pixels when zoomed out', () => {
     // At 10 px/s, 4 s past the end is only 40 px, still inside the append reach.
     assert.equal(snapDropStart({ rawStart: 13, trackIndex: 0, clips, pixelsPerSecond: 10 }), 9)
+  })
+})
+
+describe('clipBeatTimes', () => {
+  const song = { type: 'audio', asset: { beats: [0.5, 1, 1.5, 2, 2.5, 3] }, speed: 1 }
+
+  it('places the beats of a song where the clip plays them', () => {
+    const times = clipBeatTimes({ ...song, startTime: 10, duration: 3, trimStart: 0 })
+    assert.deepEqual(times, [10.5, 11, 11.5, 12, 12.5, 13])
+  })
+
+  it('drops beats before the trimmed-in point and after the clip ends', () => {
+    // plays the song from 1.2 s for 1 s: beats at 1.5 and 2 land at 0.3 s and 0.8 s into the clip
+    const times = clipBeatTimes({ ...song, startTime: 20, duration: 1, trimStart: 1.2 })
+    assert.equal(times.length, 2)
+    assert.ok(Math.abs(times[0] - 20.3) < 1e-9 && Math.abs(times[1] - 20.8) < 1e-9)
+  })
+
+  it('squeezes the beats together when the clip plays faster', () => {
+    const times = clipBeatTimes({ ...song, speed: 2, startTime: 0, duration: 1.5, trimStart: 0 })
+    assert.deepEqual(times, [0.25, 0.5, 0.75, 1, 1.25, 1.5])
+  })
+
+  it('ignores clips that are not audio or have no beats', () => {
+    assert.deepEqual(clipBeatTimes({ type: 'video', asset: { beats: [1] }, speed: 1, startTime: 0, duration: 5, trimStart: 0 }), [])
+    assert.deepEqual(clipBeatTimes({ type: 'audio', asset: {}, speed: 1, startTime: 0, duration: 5, trimStart: 0 }), [])
+  })
+
+  it('beatSnapTimes leaves out the clips being moved', () => {
+    const clips = [
+      { id: 'a', ...song, startTime: 0, duration: 3, trimStart: 0 },
+      { id: 'b', ...song, startTime: 100, duration: 3, trimStart: 0 },
+    ]
+    assert.deepEqual(beatSnapTimes(clips, new Set(['a'])), [100.5, 101, 101.5, 102, 102.5, 103])
   })
 })

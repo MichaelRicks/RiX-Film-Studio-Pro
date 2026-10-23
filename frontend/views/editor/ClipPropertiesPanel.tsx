@@ -42,6 +42,7 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
     addClipLayerKey,
     clearClipLayerKeys,
     deleteClipDisplayedTake,
+    fitClipToProgramEnd,
     removeClipLayerKey,
     resetClipLayer,
     setClipAudioLevel,
@@ -841,6 +842,18 @@ export function ClipPropertiesPanel(props: ClipPropertiesPanelProps) {
             </div>
           )
         })()}
+
+        {selectedClip.type === 'audio' && (
+          <div>
+            <button
+              className="text-xs text-zinc-300 hover:text-white px-2 py-1 rounded-md border border-zinc-700 hover:border-zinc-500 transition-colors"
+              title="End this clip where the picture ends. A clip running past it is cut there with a fade-out."
+              onClick={() => fitClipToProgramEnd(selectedClip.id)}
+            >
+              Fit to video length
+            </button>
+          </div>
+        )}
 
         {selectedClip.type === 'audio' && (() => {
           const duck = selectedClip.duck ?? { enabled: false, amountDb: DEFAULT_DUCK_AMOUNT_DB }

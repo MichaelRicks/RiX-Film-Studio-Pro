@@ -64,6 +64,32 @@ export function resolveSnap(opts: SnapOptions): SnapResult {
   return { start: best.target - best.edgeOffset, lock: best }
 }
 
+/** A music clip's beats on the timeline: its song's beat times, shifted to where the clip plays them. */
+export function clipBeatTimes(clip: {
+  type: string; startTime: number; duration: number; trimStart: number; speed: number
+  asset?: { beats?: number[] } | null
+}): number[] {
+  const beats = clip.asset?.beats
+  if (clip.type !== 'audio' || !beats || beats.length === 0) return []
+  const speed = clip.speed || 1
+  const times: number[] = []
+  for (const beat of beats) {
+    const t = clip.startTime + (beat - clip.trimStart) / speed
+    if (t >= clip.startTime - 1e-6 && t <= clip.startTime + clip.duration + 1e-6) times.push(t)
+  }
+  return times
+}
+
+/** Every beat on the timeline from music clips other than `exclude` (the ones being dragged or trimmed). */
+export function beatSnapTimes(
+  clips: Array<Parameters<typeof clipBeatTimes>[0] & { id: string }>,
+  exclude: ReadonlySet<string>,
+): number[] {
+  const times: number[] = []
+  for (const clip of clips) if (!exclude.has(clip.id)) times.push(...clipBeatTimes(clip))
+  return times
+}
+
 interface SnapClip {
   trackIndex: number
   startTime: number

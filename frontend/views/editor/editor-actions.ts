@@ -1,3 +1,4 @@
+import { isMusicTrackName } from './music-settings'
 import { MIN_ZOOM_FLOOR } from './timeline-zoom'
 import type { SetStateAction } from 'react'
 import type { ParsedTimeline } from '../../lib/timeline-import'
@@ -931,8 +932,42 @@ export function insertAssetsToTimeline(state: EditorState, params: InsertAssetsT
   }))
 }
 
-/** Track names the music tracks get: "Music", "Music 2", ... */
-const MUSIC_TRACK_NAME = /^Music( \d+)?$/
+/** Where the picture ends: the end of the last video or image clip (any clip, if there are none). */
+function programEndTime(clips: TimelineClip[]): number {
+  const visual = clips.filter(clip => clip.type === 'video' || clip.type === 'image')
+  const pool = visual.length > 0 ? visual : clips
+  return pool.reduce((end, clip) => Math.max(end, clip.startTime + clip.duration), 0)
+}
+
+/** The fade-out a clip cut to fit gets: a tenth of its length, between one and four seconds. */
+const fitFadeOut = (duration: number) => Math.min(4, Math.max(1, duration * 0.1))
+
+/**
+ * Fits an audio clip to the picture: it ends where the last video or image clip ends. A clip
+ * running past that is cut there with a fade-out; one that was cut short earlier grows back, up
+ * to the end of its song. A song shorter than the picture is left to end on its own.
+ */
+export function fitClipToProgramEnd(state: EditorState, clipId: string): EditorState {
+  const clips = selectClips(state)
+  const clip = clips.find(candidate => candidate.id === clipId)
+  if (!clip || clip.type !== 'audio') return state
+  const sourceDuration = clip.asset?.duration || 0
+  if (!(sourceDuration > 0)) return state
+  const speed = clip.speed || 1
+  const room = programEndTime(clips) - clip.startTime
+  const available = (sourceDuration - clip.trimStart) / speed
+  const duration = Math.max(0.5, Math.min(room, available))
+  const cut = duration < available - 1e-3
+  return mapClips(state, candidate => (candidate.id === clipId
+    ? {
+      ...candidate,
+      duration,
+      trimEnd: Math.max(0, sourceDuration - clip.trimStart - duration * speed),
+      // Only a cut needs a fade; a song that ends on its own already has its ending.
+      audioFadeOut: cut ? Math.max(candidate.audioFadeOut ?? 0, fitFadeOut(duration)) : candidate.audioFadeOut,
+    }
+    : candidate))
+}
 
 /**
  * Adds an audio asset (music) at `startTime`, always on a track of its own. It goes on
@@ -945,11 +980,14 @@ const MUSIC_TRACK_NAME = /^Music( \d+)?$/
  */
 export function addAudioAssetOnFreeTrack(
   state: EditorState,
-  params: { asset: Asset; startTime: number; preferredTrackIndex?: number; duck?: { enabled: boolean; amountDb: number } },
+  params: { asset: Asset; startTime: number; preferredTrackIndex?: number; duck?: { enabled: boolean; amountDb: number }; fitToProgram?: boolean },
 ): EditorState {
   const { asset, startTime } = params
   let next = addAssetToEditor(state, asset)
-  const end = startTime + (asset.duration || 5)
+  // With fitToProgram the clip will end where the picture ends, so that is the span that must be free.
+  const programEnd = programEndTime(selectClips(state))
+  const fitting = Boolean(params.fitToProgram) && programEnd > startTime + 0.5
+  const end = fitting ? Math.min(startTime + (asset.duration || 5), programEnd) : startTime + (asset.duration || 5)
   const EPS = 1e-6
   const isFree = (trackIndex: number) => !selectClips(next).some(
     clip => clip.trackIndex === trackIndex && clip.startTime < end - EPS && clip.startTime + clip.duration > startTime + EPS,
@@ -962,16 +1000,20 @@ export function addAudioAssetOnFreeTrack(
 
   let trackIndex = params.preferredTrackIndex !== undefined && usable(params.preferredTrackIndex)
     ? params.preferredTrackIndex
-    : selectTracks(next).findIndex((track, index) => MUSIC_TRACK_NAME.test(track.name) && usable(index))
+    : selectTracks(next).findIndex((track, index) => isMusicTrackName(track.name) && usable(index))
   if (trackIndex < 0) {
     next = addTrack(next, 'audio')
     trackIndex = selectTracks(next).length - 1
-    const used = selectTracks(next).filter(track => MUSIC_TRACK_NAME.test(track.name)).length
+    const used = selectTracks(next).filter(track => isMusicTrackName(track.name)).length
     next = mapTracks(next, (track, index) => (
       index === trackIndex ? { ...track, name: used === 0 ? 'Music' : `Music ${used + 1}` } : track
     ))
   }
   next = insertAssetsToTimeline(next, { assets: [asset], trackIndex, startTime })
+  const placed = selectClips(next).find(
+    clip => clip.type === 'audio' && clip.assetId === asset.id && clip.trackIndex === trackIndex && clip.startTime === startTime,
+  )
+  if (fitting && placed) next = fitClipToProgramEnd(next, placed.id)
   const { duck } = params
   if (!duck) return next
   return mapClips(next, clip => (

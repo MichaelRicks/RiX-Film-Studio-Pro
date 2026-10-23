@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, FolderOpen, Music, Pause, Play, Plus, Search } from 'lucide-react'
+import { AlertTriangle, Cloud, FolderOpen, Loader2, Music, Pause, Play, Plus, Search } from 'lucide-react'
 import type { ElectronAPI } from '../../../shared/electron-api-schema'
 import { addGenericAssetToProject } from '../../lib/asset-copy'
 import { pathToFileUrl } from '../../lib/file-url'
@@ -13,7 +13,7 @@ import { logger } from '../../lib/logger'
 import type { Asset } from '../../types/project-model'
 import { selectClips, selectCurrentTime } from './editor-selectors'
 import { useEditorActions, useEditorStore } from './editor-store'
-import { MUSIC_DND, defaultMusicDuck, getAutoDuckDefault, setAutoDuckDefault } from './music-settings'
+import { MUSIC_DND, defaultMusicDuck, getAutoDuckDefault, getFitDefault, setAutoDuckDefault, setFitDefault } from './music-settings'
 import { isLibraryMusic, useMusicDucking } from './useMusicDucking'
 
 type MusicLibrary = Awaited<ReturnType<ElectronAPI['musicLibList']>>
@@ -48,7 +48,13 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
   const [addingId, setAddingId] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState<ReadonlySet<string>>(new Set())
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
+  const [downloadError, setDownloadError] = useState('')
+  const [importNote, setImportNote] = useState('')
+  const [dragOver, setDragOver] = useState(false)
   const [autoDuckDefault, setAutoDuckDefaultState] = useState(getAutoDuckDefault)
+  const [fitToVideo, setFitToVideo] = useState(getFitDefault)
   // The box shows what the music already on the timeline is doing; with none, the default for new music.
   const musicOnTimeline = useMemo(() => clips.filter(isLibraryMusic), [clips])
   const autoDuck = musicOnTimeline.length > 0 ? musicOnTimeline.some(c => c.duck?.enabled) : autoDuckDefault
@@ -58,7 +64,52 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
     try { setLibrary(await window.electronAPI.musicLibList()) } catch (e) { logger.warn(`music library load failed: ${e}`) }
   }, [])
 
-  useEffect(() => { void reload() }, [reload])
+  // Show what is on disk straight away, then ask the song pack for anything new.
+  useEffect(() => {
+    void reload()
+    void window.electronAPI.musicLibSync().then((r) => { if (r.added > 0) void reload() }).catch(() => {})
+  }, [reload])
+
+  /** The song's file path, downloading it from the pack first if it is not on this computer yet. */
+  const ensureLocal = useCallback(async (track: MusicTrack): Promise<string | null> => {
+    if (track.local) return track.path
+    setDownloadError('')
+    setDownloading((prev) => new Set(prev).add(track.id))
+    try {
+      const result = await window.electronAPI.musicLibDownload({ id: track.id })
+      if (!result.success) { setDownloadError(result.error); return null }
+      setLibrary((lib) => lib && { ...lib, tracks: lib.tracks.map((t) => (t.id === track.id ? { ...t, local: true } : t)) })
+      return result.path
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : 'The download failed.')
+      return null
+    } finally {
+      setDownloading((prev) => { const next = new Set(prev); next.delete(track.id); return next })
+    }
+  }, [])
+
+  /** Copies songs into the music folder: the ones picked in the file dialog, or `paths` dropped on the panel. */
+  const importMusic = async (paths?: string[]) => {
+    setImportNote('')
+    const result = await window.electronAPI.musicLibImport({ paths }).catch((e: unknown) => ({ success: false as const, error: String(e) }))
+    if (!result.success) { setImportNote(result.error); return }
+    if (result.added > 0) {
+      setImportNote(`Added ${result.added} song${result.added === 1 ? '' : 's'}.`)
+      await reload()
+    } else if (paths) {
+      setImportNote('Drop MP3, WAV, M4A, OGG, FLAC or AAC files to add them.')
+    }
+  }
+
+  const downloadAll = async () => {
+    const todo = (library?.tracks ?? []).filter((t) => !t.local)
+    setBulk({ done: 0, total: todo.length })
+    for (let i = 0; i < todo.length; i++) {
+      if (!(await ensureLocal(todo[i]))) break
+      setBulk({ done: i + 1, total: todo.length })
+    }
+    setBulk(null)
+  }
 
   const stop = useCallback(() => {
     audioRef.current?.pause()
@@ -72,8 +123,9 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
     if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load() }
   }, [])
 
-  const togglePlay = (track: MusicTrack) => {
+  const togglePlay = async (track: MusicTrack) => {
     if (playingId === track.id) { stop(); return }
+    if (!(await ensureLocal(track))) return
     if (!audioRef.current) {
       const audio = new Audio()
       audio.onended = () => { setPlayingId(null); setProgress(0) }
@@ -98,6 +150,7 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
     if (addingId) return
     setAddingId(track.id)
     try {
+      if (!(await ensureLocal(track))) return
       // Copy into the project like any imported audio, so the project keeps working
       // when the music folder moves; fall back to the library file if the copy fails.
       const copied = currentProjectId ? await addGenericAssetToProject(track.path, currentProjectId) : null
@@ -111,8 +164,9 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
         resolution: 'music',
         duration,
         createdAt: Date.now(),
+        ...(track.beats.length > 0 ? { beats: track.beats } : {}),
       }
-      addAudioAssetOnFreeTrack({ asset, startTime: currentTime, duck: defaultMusicDuck() })
+      addAudioAssetOnFreeTrack({ asset, startTime: currentTime, duck: defaultMusicDuck(), fitToProgram: fitToVideo })
       ducking.applyForAsset(asset.id)
     } finally {
       setAddingId(null)
@@ -137,10 +191,27 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
   const total = library?.tracks.length ?? 0
   const status = !library ? 'Loading…'
     : total === 0 ? 'No music found yet.'
-      : `${visible.length === total ? total : `${visible.length} of ${total}`} songs. Double-click to add at the playhead.`
+      : `${visible.length === total ? total : `${visible.length} of ${total}`} songs. Double-click or drag to add. Hold Alt while moving a clip to snap to the beats.`
 
   return (
-    <div className="flex flex-col min-h-0 h-full border-r border-zinc-800">
+    <div
+      className={`flex flex-col min-h-0 h-full border-r border-zinc-800 ${dragOver ? 'ring-1 ring-inset ring-blue-500/70 bg-blue-500/5' : ''}`}
+      onDragOver={(e) => {
+        // Audio files from Explorer. Songs being dragged out of this list are not files, so they pass through.
+        if (!e.dataTransfer.types.includes('Files')) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        if (!dragOver) setDragOver(true)
+      }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
+      onDrop={(e) => {
+        setDragOver(false)
+        if (e.dataTransfer.files.length === 0) return
+        e.preventDefault()
+        const paths = Array.from(e.dataTransfer.files).map((file) => window.electronAPI.getPathForFile(file)).filter(Boolean)
+        void importMusic(paths)
+      }}
+    >
       <div className="p-4 pb-2 flex-shrink-0">
         <h3 className="text-sm font-semibold tracking-wider text-white">MUSIC</h3>
         <p className="mt-0.5 text-[11px] text-zinc-500">{status}</p>
@@ -180,7 +251,7 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
         {library && total === 0 && (
           <div className="px-2 py-6 text-center text-[11px] text-zinc-500 space-y-3">
             <Music className="h-6 w-6 mx-auto text-zinc-700" />
-            <p>Put music files (MP3, WAV…) in your music folder, or choose a folder that has some.</p>
+            <p>Add music files (MP3, WAV…) with Import music, drop them here, or choose a folder that has some.</p>
           </div>
         )}
         {visible.map((track) => {
@@ -191,22 +262,22 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
             <div
               key={track.id}
               onDoubleClick={() => { void addToTimeline(track) }}
-              draggable
+              draggable={track.local}
               onDragStart={(e) => {
-                e.dataTransfer.setData(MUSIC_DND, JSON.stringify({ path: track.path, title: track.title }))
+                e.dataTransfer.setData(MUSIC_DND, JSON.stringify({ path: track.path, title: track.title, beats: track.beats }))
                 e.dataTransfer.effectAllowed = 'copy'
               }}
               className={`group rounded-md px-2 py-1.5 transition-colors ${playing ? 'bg-zinc-800/80' : 'hover:bg-zinc-800/50'}`}
             >
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => togglePlay(track)}
-                  title={playing ? 'Stop preview' : 'Preview'}
+                  onClick={() => { void togglePlay(track) }}
+                  title={playing ? 'Stop preview' : track.local ? 'Preview' : 'Download and preview'}
                   className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center transition-colors ${
                     playing ? 'bg-blue-500 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
                   }`}
                 >
-                  {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 ml-px" />}
+                  {downloading.has(track.id) ? <Loader2 className="h-3 w-3 animate-spin" /> : playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3 ml-px" />}
                 </button>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -217,7 +288,12 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
                     )}
                   </div>
                   <div className="text-[10px] text-zinc-500 truncate">{meta}</div>
-                  {facts && <div className="text-[10px] text-zinc-600 truncate">{facts}</div>}
+                  {(facts || !track.local) && (
+                    <div className="text-[10px] text-zinc-600 truncate flex items-center gap-1">
+                      {!track.local && <Cloud className="h-2.5 w-2.5 flex-shrink-0" aria-label="Not on this computer yet" />}
+                      {[facts, !track.local && track.bytes > 0 ? `${(track.bytes / 1048576).toFixed(1)} MB` : ''].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => { void addToTimeline(track) }}
@@ -239,6 +315,32 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
       </div>
 
       <div className="flex-shrink-0 px-4 py-2 border-t border-zinc-800/80 space-y-1">
+        {library && library.tracks.some((t) => !t.local) && (
+          <div className="pb-1">
+            <button
+              className="flex items-center gap-1.5 text-[10px] text-zinc-400 hover:text-blue-400 disabled:opacity-60 transition-colors"
+              disabled={bulk !== null}
+              onClick={() => { void downloadAll() }}
+              title="Download every song that is not on this computer yet"
+            >
+              <Cloud className="h-3 w-3" />
+              {bulk
+                ? `Downloading ${bulk.done} of ${bulk.total}…`
+                : `Download all ${library.tracks.filter((t) => !t.local).length} songs (${(library.tracks.filter((t) => !t.local).reduce((sum, t) => sum + t.bytes, 0) / 1048576).toFixed(0)} MB)`}
+            </button>
+          </div>
+        )}
+        {downloadError && <p className="text-[10px] text-red-400 leading-snug">{downloadError}</p>}
+        {importNote && <p className="text-[10px] text-zinc-400 leading-snug">{importNote}</p>}
+        <label className="flex items-center gap-2 cursor-pointer" title="A song longer than the video is cut where the video ends, with a fade-out. You can also fit any clip from its properties.">
+          <input
+            type="checkbox"
+            checked={fitToVideo}
+            onChange={(e) => { setFitToVideo(e.target.checked); setFitDefault(e.target.checked) }}
+            className="rounded bg-zinc-800 border-zinc-600"
+          />
+          <span className="text-[11px] text-zinc-300">Fit new music to the video</span>
+        </label>
         <label className="flex items-center gap-2 cursor-pointer pb-1" title="Music lowers itself while other clips on the timeline are speaking. This switches it for all the music on this timeline and for music you add next. The dips are volume keyframes on each clip that you can drag.">
           <input
             type="checkbox"
@@ -257,6 +359,14 @@ export function MusicPanel({ currentProjectId }: { currentProjectId: string | nu
         {library?.license && <p className="text-[9px] text-zinc-600 leading-snug">{library.license}</p>}
         <p className="text-[9px] text-zinc-600 truncate" title={library?.root}>{library?.root}</p>
         <div className="flex items-center gap-3">
+          <button
+            className="flex items-center gap-1 text-[10px] text-zinc-300 hover:text-blue-400 transition-colors"
+            onClick={() => { void importMusic() }}
+            title="Add songs from your computer to this library. You can also drop audio files onto this panel."
+          >
+            <Plus className="h-3 w-3" />
+            Import music
+          </button>
           <button
             className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-blue-400 transition-colors"
             onClick={() => { void window.electronAPI.musicLibReveal() }}
