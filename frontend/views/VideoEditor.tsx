@@ -194,6 +194,7 @@ function VideoEditorWithStore({
   
   const currentProjectId = currentProject.id
   const actions = useEditorActions()
+  const getEditorState = useEditorGetState()
   const { pendingTimelineFromAssets, setPendingTimelineFromAssets } = useProjects()
 
   // Create's "To Timeline": a new timeline with the chosen assets laid end to end. Runs once the
@@ -207,11 +208,14 @@ function VideoEditorWithStore({
     const byId = new Map(currentProject.assets.map(asset => [asset.id, asset]))
     const assets = assetIds.flatMap(id => byId.get(id) ?? [])
     if (assets.length === 0) return
-    actions.createTimeline(name)
+    // Same-day selections would all share a name, so number the repeats: "Selection - Oct 23 2".
+    const taken = new Set(getEditorState().editorModel.timelines.map(timeline => timeline.name))
+    let uniqueName = name
+    for (let n = 2; taken.has(uniqueName); n++) uniqueName = `${name} ${n}`
+    actions.createTimeline(uniqueName)
     actions.insertAssetsToTimeline({ assets, trackIndex: 0, startTime: 0 })
-  }, [pendingTimelineFromAssets, setPendingTimelineFromAssets, currentProject.assets, actions])
+  }, [pendingTimelineFromAssets, setPendingTimelineFromAssets, currentProject.assets, actions, getEditorState])
 
-  const getEditorState = useEditorGetState()
   const editorModel = useEditorStore(state => state.editorModel)
   const subtitles = useEditorStore(selectSubtitles)
   const currentTime = useEditorStore(selectCurrentTime)
