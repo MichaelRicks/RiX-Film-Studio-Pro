@@ -194,6 +194,23 @@ function VideoEditorWithStore({
   
   const currentProjectId = currentProject.id
   const actions = useEditorActions()
+  const { pendingTimelineFromAssets, setPendingTimelineFromAssets } = useProjects()
+
+  // Create's "To Timeline": a new timeline with the chosen assets laid end to end. Runs once the
+  // editor is mounted (Project mounts it when the tab switches), then the request is cleared.
+  const handledTimelineRequestRef = useRef<unknown>(null)
+  useEffect(() => {
+    if (!pendingTimelineFromAssets || handledTimelineRequestRef.current === pendingTimelineFromAssets) return
+    handledTimelineRequestRef.current = pendingTimelineFromAssets
+    const { assetIds, name } = pendingTimelineFromAssets
+    setPendingTimelineFromAssets(null)
+    const byId = new Map(currentProject.assets.map(asset => [asset.id, asset]))
+    const assets = assetIds.flatMap(id => byId.get(id) ?? [])
+    if (assets.length === 0) return
+    actions.createTimeline(name)
+    actions.insertAssetsToTimeline({ assets, trackIndex: 0, startTime: 0 })
+  }, [pendingTimelineFromAssets, setPendingTimelineFromAssets, currentProject.assets, actions])
+
   const getEditorState = useEditorGetState()
   const editorModel = useEditorStore(state => state.editorModel)
   const subtitles = useEditorStore(selectSubtitles)

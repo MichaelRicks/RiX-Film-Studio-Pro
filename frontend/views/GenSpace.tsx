@@ -1954,6 +1954,8 @@ export function GenSpace() {
     setGenSpaceEditMode,
     genSpaceAudioPath,
     setGenSpaceAudioPath,
+    setCurrentTab,
+    setPendingTimelineFromAssets,
     genSpaceRetakeSource,
     setGenSpaceRetakeSource,
     setPendingRetakeUpdate,
@@ -4278,6 +4280,16 @@ export function GenSpace() {
     }
   }, [currentProjectId, selectedIds, updateAsset])
 
+  // Hand the selection (in grid order, not click order) to the Video Editor as a new timeline.
+  const sendSelectionToTimeline = useCallback(() => {
+    const assetIds = filteredAssets.filter(a => selectedIds.has(a.id)).map(a => a.id)
+    if (assetIds.length === 0) return
+    const stamp = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    setPendingTimelineFromAssets({ assetIds, name: `Selection - ${stamp}` })
+    exitSelectMode()
+    setCurrentTab('video-editor')
+  }, [filteredAssets, selectedIds, setPendingTimelineFromAssets, setCurrentTab, exitSelectMode])
+
   const deleteSelection = useCallback(() => {
     if (selectedIds.size === 0) return
     if (!window.confirm(`Delete ${selectedIds.size} selected item${selectedIds.size === 1 ? '' : 's'}? This can't be undone.`)) return
@@ -4638,6 +4650,15 @@ export function GenSpace() {
                     ]}
                   />
                 </div>
+                <button
+                  onClick={sendSelectionToTimeline}
+                  disabled={selectedIds.size === 0}
+                  title="Lay the selected clips end to end on a new timeline in the Video Editor"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold bg-accent hover:bg-accent-dark text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Film className="h-3.5 w-3.5" />
+                  To Timeline
+                </button>
                 <button
                   onClick={deleteSelection}
                   disabled={selectedIds.size === 0}

@@ -46,6 +46,9 @@ interface ProjectContextType {
   setGenSpaceEditMode: (mode: 'image' | 'video' | null) => void
   genSpaceAudioPath: string | null
   setGenSpaceAudioPath: (path: string | null) => void
+  /** Asset ids (in order) the Video Editor should lay end to end on a brand-new timeline. */
+  pendingTimelineFromAssets: { assetIds: string[]; name: string } | null
+  setPendingTimelineFromAssets: (request: { assetIds: string[]; name: string } | null) => void
   genSpaceRetakeSource: GenSpaceRetakeSource | null
   setGenSpaceRetakeSource: (source: GenSpaceRetakeSource | null) => void
   pendingRetakeUpdate: PendingRetakeUpdate | null
@@ -109,6 +112,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [genSpaceEditImagePath, setGenSpaceEditImagePath] = useState<string | null>(null)
   const [genSpaceEditMode, setGenSpaceEditMode] = useState<'image' | 'video' | null>(null)
   const [genSpaceAudioPath, setGenSpaceAudioPath] = useState<string | null>(null)
+  const [pendingTimelineFromAssets, setPendingTimelineFromAssets] = useState<{ assetIds: string[]; name: string } | null>(null)
   const [genSpaceRetakeSource, setGenSpaceRetakeSource] = useState<GenSpaceRetakeSource | null>(null)
   const [pendingRetakeUpdate, setPendingRetakeUpdate] = useState<PendingRetakeUpdate | null>(null)
   const [genSpaceIcLoraSource, setGenSpaceIcLoraSource] = useState<GenSpaceIcLoraSource | null>(null)
@@ -479,6 +483,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       setGenSpaceEditMode,
       genSpaceAudioPath,
       setGenSpaceAudioPath,
+      pendingTimelineFromAssets,
+      setPendingTimelineFromAssets,
       genSpaceRetakeSource,
       setGenSpaceRetakeSource,
       pendingRetakeUpdate,
