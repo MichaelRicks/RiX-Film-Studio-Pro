@@ -174,6 +174,7 @@ function AssetCard({
   selectMode = false,
   selected = false,
   onToggleSelect,
+  onSendToTimeline,
   aspectRatio,
   onMeasured,
 }: {
@@ -199,7 +200,24 @@ function AssetCard({
   selectMode?: boolean
   selected?: boolean
   onToggleSelect?: () => void
+  onSendToTimeline?: () => void
 }) {
+  const [timelineMenu, setTimelineMenu] = useState<{ x: number; y: number } | null>(null)
+  useEffect(() => {
+    if (!timelineMenu) return
+    const close = () => setTimelineMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
+    window.addEventListener('click', close)
+    window.addEventListener('blur', close)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [timelineMenu])
   const hoverVideoRef = useRef<HTMLVideoElement>(null)
   const [isHovered, setIsHovered] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -250,12 +268,34 @@ function AssetCard({
     postAssetToX(asset)
   }
 
+  const timelineMenuEl = timelineMenu && onSendToTimeline ? createPortal(
+    <div
+      className="fixed z-[100] min-w-[190px] rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+      style={{ left: timelineMenu.x, top: timelineMenu.y }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={() => { setTimelineMenu(null); onSendToTimeline() }}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 hover:text-white"
+      >
+        <Film className="h-3.5 w-3.5" />
+        Send to new timeline
+      </button>
+    </div>,
+    document.body,
+  ) : null
+
   return (
     <div
       data-asset-id={asset.id}
       className={`relative group cursor-pointer rounded-xl overflow-hidden bg-zinc-900 ${
         selectMode && selected ? 'ring-2 ring-accent ring-offset-2 ring-offset-zinc-950' : ''
       }`}
+      onContextMenu={(e) => {
+        if (selectMode || !onSendToTimeline) return
+        e.preventDefault()
+        setTimelineMenu({ x: e.clientX, y: e.clientY })
+      }}
       onMouseEnter={() => { if (!selectMode) setIsHovered(true) }}
       onMouseLeave={() => {
         setIsHovered(false)
@@ -277,6 +317,7 @@ function AssetCard({
       )}
       {/* In select mode, a full-card shield swallows hover controls so clicks only toggle selection. */}
       {selectMode && <div className="absolute inset-0 z-20" />}
+      {timelineMenuEl}
       {asset.type === 'video' ? (
         <div
           className={`relative w-full bg-zinc-900 ${aspectRatio ? '' : 'aspect-video'}`}
@@ -4281,14 +4322,15 @@ export function GenSpace() {
   }, [currentProjectId, selectedIds, updateAsset])
 
   // Hand the selection (in grid order, not click order) to the Video Editor as a new timeline.
-  const sendSelectionToTimeline = useCallback(() => {
-    const assetIds = filteredAssets.filter(a => selectedIds.has(a.id)).map(a => a.id)
+  const sendToNewTimeline = useCallback((ids: Set<string>) => {
+    const assetIds = filteredAssets.filter(a => ids.has(a.id)).map(a => a.id)
     if (assetIds.length === 0) return
     const stamp = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     setPendingTimelineFromAssets({ assetIds, name: `Selection - ${stamp}` })
     exitSelectMode()
     setCurrentTab('video-editor')
-  }, [filteredAssets, selectedIds, setPendingTimelineFromAssets, setCurrentTab, exitSelectMode])
+  }, [filteredAssets, setPendingTimelineFromAssets, setCurrentTab, exitSelectMode])
+  const sendSelectionToTimeline = useCallback(() => sendToNewTimeline(selectedIds), [sendToNewTimeline, selectedIds])
 
   const deleteSelection = useCallback(() => {
     if (selectedIds.size === 0) return
@@ -4393,6 +4435,7 @@ export function GenSpace() {
       asset={asset}
       aspectRatio={natural ? ratio : undefined}
       onMeasured={handleMediaMeasured}
+      onSendToTimeline={() => sendToNewTimeline(new Set([asset.id]))}
       onDelete={() => handleDelete(asset.id)}
       onPlay={() => setSelectedAsset(asset)}
       onDragStart={handleDragStart}
@@ -4417,7 +4460,7 @@ export function GenSpace() {
   ) }
   }), [
     // measuredRatiosVersion: bumps when measuredRatiosRef gains entries, so ratios are re-read.
-    filteredAssets, bins, handleDelete, handleDragStart, handleCreateVideo, handleRegenerate,
+    filteredAssets, bins, sendToNewTimeline, handleDelete, handleDragStart, handleCreateVideo, handleRegenerate,
     handleRetake, handleExtend, handleIcLora, forceApiGenerations, currentProjectId,
     toggleFavorite, updateAsset, setSelectedAsset, setCreatingTagFor,
     selectMode, selectedIds, toggleSelect, natural, handleMediaMeasured, measuredRatiosVersion,
