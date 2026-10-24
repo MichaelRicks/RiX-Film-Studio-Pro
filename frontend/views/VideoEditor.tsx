@@ -208,10 +208,16 @@ function VideoEditorWithStore({
     const byId = new Map(currentProject.assets.map(asset => [asset.id, asset]))
     const assets = assetIds.flatMap(id => byId.get(id) ?? [])
     if (assets.length === 0) return
-    // Same-day selections would all share a name, so number the repeats: "Selection - Oct 23 2".
+    // Name it after the first clip's prompt ("Campfire man +3"); the dated name is the fallback
+    // when there is no prompt. Repeats get a number so no two timelines share a name.
+    const promptWords = (assets[0].prompt || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+    const promptName = promptWords.slice(0, 4).join(' ').replace(/[.,;:!?-]+$/, '')
+    const baseName = promptName
+      ? `${promptName}${promptWords.length > 4 ? '…' : ''}${assets.length > 1 ? ` +${assets.length - 1}` : ''}`
+      : name
     const taken = new Set(getEditorState().editorModel.timelines.map(timeline => timeline.name))
-    let uniqueName = name
-    for (let n = 2; taken.has(uniqueName); n++) uniqueName = `${name} ${n}`
+    let uniqueName = baseName
+    for (let n = 2; taken.has(uniqueName); n++) uniqueName = `${baseName} ${n}`
     actions.createTimeline(uniqueName)
     actions.insertAssetsToTimeline({ assets, trackIndex: 0, startTime: 0 })
   }, [pendingTimelineFromAssets, setPendingTimelineFromAssets, currentProject.assets, actions, getEditorState])
