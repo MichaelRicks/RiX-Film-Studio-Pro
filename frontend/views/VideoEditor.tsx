@@ -210,11 +210,19 @@ function VideoEditorWithStore({
     if (assets.length === 0) return
     // Name it after the first clip's prompt ("Campfire man +3"); the dated name is the fallback
     // when there is no prompt. Repeats get a number so no two timelines share a name.
-    // Prompts often open with a markdown heading ("### Reference Sheet Description"); name the
-    // timeline from the first line that is not one, and strip markdown marks from what is used.
-    const promptLines = (assets[0].prompt || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-    const promptLine = promptLines.find(line => !/^#{1,6}\s/.test(line)) ?? promptLines[0] ?? ''
+    // Prompts often open with layout boilerplate. A reference-sheet prompt starts with a "Reference
+    // Sheet Description" part and the scene is under "### Target Description", so name from that;
+    // skip other markdown headings, the "sheet below is layout only" line and the stock
+    // "A single full-frame, live-action cinematic scene" opener, and strip markdown marks.
+    const rawPrompt = assets[0].prompt || ''
+    const targetHeading = /#{1,6}\s*Target Description\s*\r?\n/i.exec(rawPrompt)
+    const scenePrompt = targetHeading ? rawPrompt.slice(targetHeading.index + targetHeading[0].length) : rawPrompt
+    const promptLines = scenePrompt.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    const promptLine = (promptLines.find(line => !/^#{1,6}\s/.test(line)) ?? promptLines[0] ?? '')
+      .replace(/^the sheet below is layout only\.[^.]*\.\s*/i, '')
+      .replace(/^an? single full-frame,?\s+live-action cinematic scene\s+(?:inside|in|at|on)?\s*/i, '')
     const promptWords = promptLine.replace(/[#*_`>\[\]]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+    if (promptWords.length > 0) promptWords[0] = promptWords[0][0].toUpperCase() + promptWords[0].slice(1)
     const promptName = promptWords.slice(0, 4).join(' ').replace(/[.,;:!?-]+$/, '')
     const baseName = promptName
       ? `${promptName}${promptWords.length > 4 ? '…' : ''}${assets.length > 1 ? ` +${assets.length - 1}` : ''}`
