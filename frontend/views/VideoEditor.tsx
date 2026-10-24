@@ -210,7 +210,11 @@ function VideoEditorWithStore({
     if (assets.length === 0) return
     // Name it after the first clip's prompt ("Campfire man +3"); the dated name is the fallback
     // when there is no prompt. Repeats get a number so no two timelines share a name.
-    const promptWords = (assets[0].prompt || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+    // Prompts often open with a markdown heading ("### Reference Sheet Description"); name the
+    // timeline from the first line that is not one, and strip markdown marks from what is used.
+    const promptLines = (assets[0].prompt || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    const promptLine = promptLines.find(line => !/^#{1,6}\s/.test(line)) ?? promptLines[0] ?? ''
+    const promptWords = promptLine.replace(/[#*_`>\[\]]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
     const promptName = promptWords.slice(0, 4).join(' ').replace(/[.,;:!?-]+$/, '')
     const baseName = promptName
       ? `${promptName}${promptWords.length > 4 ? '…' : ''}${assets.length > 1 ? ` +${assets.length - 1}` : ''}`
