@@ -3974,10 +3974,9 @@ export function GenSpace() {
     // starts once trimmed (a character sheet cut off the front, say). Regenerate from the
     // frame the clip opens on now. The first frame of an untrimmed clip is the same picture.
     let startImage = params.inputImageUrl ?? null
-    if (
-      asset.type === 'video' && startImage
-      && (params.mode === 'image-to-video' || params.mode === 'audio-to-video')
-    ) {
+    // Applies to text-to-video clips too (no stored start image): the slot still takes the
+    // frame the clip opens on, so the regenerate keeps the shot's look.
+    if (asset.type === 'video' && !isImageGen) {
       const framePath = await frameSeedFromVideo(asset.path)
       if (framePath) {
         // Keep a copy in the project: the temp file may be gone by the next regenerate.
