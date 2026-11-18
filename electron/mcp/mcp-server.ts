@@ -106,17 +106,51 @@ const TOOLS: Tool[] = [
       + 'Used by the rix-prompt skill ("Prompt with Claude"). Replaces the box\'s text (the user can undo it). Does not start a generation.',
     inputSchema: {
       type: 'object',
-      properties: { prompt: { type: 'string', description: 'The complete prompt text, exactly as it should appear in the box' } },
+      properties: {
+        prompt: { type: 'string', description: 'The complete prompt text, exactly as it should appear in the box' },
+        image_path: { type: 'string', description: 'Absolute path of the reference/first-frame image (optional). RiX offers to save it as the prompt\'s thumbnail and first frame.' },
+        folder: { type: 'string', description: 'Suggested Prompt Manager folder name for the save dialog, e.g. the character or project (optional)' },
+        thumbnail_only: { type: 'boolean', description: 'true when image_path is a reference SHEET: it is used as the thumbnail only and is never loaded as the first frame' },
+      },
       required: ['prompt'],
     },
     run: async (args) => {
       const prompt = str(args.prompt)
       if (!prompt?.trim()) throw new Error('"prompt" is required')
-      const result = await callEditor('set_generation_prompt', { prompt }, 10000)
+      const result = await callEditor('set_generation_prompt', { prompt, image_path: str(args.image_path), folder: str(args.folder), thumbnail_only: args.thumbnail_only === true }, 10000)
       // Bring RiX forward so the user sees the prompt land in the box.
       const win = getMainWindow()
       if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus() }
       return text(result)
+    },
+  },
+  {
+    name: 'list_prompt_folders',
+    description: 'List the folders in the user\'s Prompt Manager Pro prompt library (name and prompt count). '
+      + 'Call this before save_prompt so you can pick an existing folder instead of creating a near-duplicate.',
+    inputSchema: { type: 'object', properties: {} },
+    run: async () => text(await callEditor('list_prompt_folders', {}, 10000)),
+  },
+  {
+    name: 'save_prompt',
+    description: 'Save a prompt into a folder of the user\'s Prompt Manager Pro library (the folder is created if it does not exist). '
+      + 'Only call this after the user said yes to "save this prompt?" in chat. Optionally attaches an image as the prompt\'s thumbnail. '
+      + 'An identical prompt already in that folder is not duplicated.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The prompt text, exactly as you put it in the prompt box' },
+        folder: { type: 'string', description: 'Folder name (matched case-insensitively; created if new)' },
+        image_path: { type: 'string', description: 'Absolute path of the reference/first-frame image to use as the thumbnail (optional)' },
+      },
+      required: ['prompt', 'folder'],
+    },
+    run: async (args) => {
+      const prompt = str(args.prompt)
+      const folder = str(args.folder)
+      if (!prompt?.trim()) throw new Error('"prompt" is required')
+      if (!folder?.trim()) throw new Error('"folder" is required')
+      return text(await callEditor('save_prompt', { prompt, folder, image_path: str(args.image_path) }, 15000))
     },
   },
   {

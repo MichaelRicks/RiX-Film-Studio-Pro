@@ -180,10 +180,51 @@ export function savePromptFolders(folders: GpmPromptFolder[]): Promise<IDBValidK
   return kvSet(KEY_PROMPTS, lean)
 }
 
+/** Downscale a (possibly large) image data URL into a compact JPEG thumbnail so
+ *  the per-prompt visual cue stays light in IndexedDB. Falls back to the original
+ *  data URL if the image can't be decoded. */
+export function downscaleToThumb(dataUrl: string, maxW = 360): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new window.Image()
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxW / (img.naturalWidth || maxW))
+        const w = Math.max(1, Math.round((img.naturalWidth || maxW) * scale))
+        const h = Math.max(1, Math.round((img.naturalHeight || maxW) * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w; canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { resolve(dataUrl); return }
+        ctx.drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', 0.82))
+      } catch {
+        resolve(dataUrl)
+      }
+    }
+    img.onerror = () => resolve(dataUrl)
+    img.src = dataUrl
+  })
+}
+
+/** Fired on `window` after something outside the Prompt Manager changes the saved prompts
+ *  (Claude's save_prompt), so an open Prompts panel reloads instead of overwriting them. */
+export const GPM_PROMPTS_CHANGED = 'gpm-prompts-changed'
+
 interface ThumbRecord { promptId: string; _thumb: string }
 export function getPromptThumb(promptId: string): Promise<string | undefined> {
   return tx<ThumbRecord | undefined>(THUMB_STORE, 'readonly', (s) => s.get(promptId) as IDBRequest<ThumbRecord | undefined>)
     .then((r) => r?._thumb)
+}
+/** Original (full-size) reference image per prompt, so Inject can load it as the first frame.
+ *  The thumbnail itself is only 360px wide, far too small to generate from. */
+const KEY_PROMPT_IMAGES = 'gpm_prompt_images_v1'
+export async function getPromptImagePath(promptId: string): Promise<string | undefined> {
+  return (await kvGet<Record<string, string>>(KEY_PROMPT_IMAGES, {}))[promptId]
+}
+export async function setPromptImagePath(promptId: string, path: string): Promise<void> {
+  const map = await kvGet<Record<string, string>>(KEY_PROMPT_IMAGES, {})
+  map[promptId] = path
+  await kvSet(KEY_PROMPT_IMAGES, map)
 }
 export function setPromptThumb(promptId: string, thumb: string): Promise<IDBValidKey> {
   return tx<IDBValidKey>(THUMB_STORE, 'readwrite', (s) => s.put({ promptId, _thumb: thumb }))

@@ -31,6 +31,7 @@ import { type IcLoraListItem } from '../hooks/use-catalog'
 import { useIcLoraLibrary } from '../hooks/use-ic-lora-library'
 import { useLoraLibrary } from '../hooks/use-lora-library'
 import { PromptWithClaudeModal } from '../components/PromptWithClaudeModal'
+import { SavePromptDialog } from '../components/SavePromptDialog'
 import { registerGenerationPromptTarget } from '../lib/generation-prompt-bridge'
 import { usePromptEnhancerProvider, type EnhanceProvider } from '../hooks/use-prompt-enhancer-provider'
 import { useGlobalGenerationLock } from '../hooks/use-global-generation-lock'
@@ -3470,8 +3471,13 @@ export function GenSpace() {
   const [promptWithClaudeOpen, setPromptWithClaudeOpen] = useState(false)
   const promptRef = useRef(prompt)
   promptRef.current = prompt
+  // After the prompt lands, RiX itself offers to save it (with the reference image) to the library.
+  const [savePromptOffer, setSavePromptOffer] = useState<{ prompt: string; imagePath?: string; folder?: string; thumbnailOnly?: boolean } | null>(null)
   useEffect(
-    () => registerGenerationPromptTarget(next => applyEnhanceResult(promptRef.current, next)),
+    () => registerGenerationPromptTarget((next, meta) => {
+      applyEnhanceResult(promptRef.current, next)
+      setSavePromptOffer({ prompt: next, imagePath: meta.imagePath, folder: meta.folder, thumbnailOnly: meta.thumbnailOnly })
+    }),
     [applyEnhanceResult],
   )
 
@@ -4997,6 +5003,16 @@ export function GenSpace() {
               isCommunity: entry?.author?.affiliation !== 'ltx',
             }
           })} />
+        )}
+
+        {savePromptOffer && (
+          <SavePromptDialog
+            prompt={savePromptOffer.prompt}
+            imagePath={savePromptOffer.imagePath}
+            thumbnailOnly={savePromptOffer.thumbnailOnly}
+            suggestedFolder={savePromptOffer.folder}
+            onClose={() => setSavePromptOffer(null)}
+          />
         )}
 
         {promptWithClaudeOpen && (

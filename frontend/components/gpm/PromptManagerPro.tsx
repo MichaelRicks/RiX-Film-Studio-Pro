@@ -22,7 +22,7 @@ import {
   type GpmPromptFolder, type GpmImageFolder, type GpmImage, gpmId,
   loadPromptFolders, savePromptFolders, loadImageFolders, saveImageFolders,
   loadImages, putImage, deleteImage, exportBackup, importBackup, parseBackup,
-  loadAllPromptThumbs, setPromptThumb, deletePromptThumb,
+  loadAllPromptThumbs, setPromptThumb, deletePromptThumb, downscaleToThumb, getPromptImagePath, GPM_PROMPTS_CHANGED,
   type GpmWorkflow, loadWorkflows, saveWorkflows,
   type GpmPerformance, loadPerformances, savePerformances, loadWorkingPerf, saveWorkingPerf,
   type GpmPanorama, loadPanoramas, putPanorama, deletePanorama, MAX_PANORAMAS,
@@ -1148,32 +1148,6 @@ function BackupRow({ onAfterImport, flash }: { onAfterImport: () => void; flash:
 
 /* ---- Prompts (folders + cards) ------------------------------------------- */
 
-// Downscale a (possibly large) image data URL into a compact JPEG thumbnail so
-// the per-prompt visual cue stays light in IndexedDB. Falls back to the original
-// data URL if the image can't be decoded.
-function downscaleToThumb(dataUrl: string, maxW = 360): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new window.Image()
-    img.onload = () => {
-      try {
-        const scale = Math.min(1, maxW / (img.naturalWidth || maxW))
-        const w = Math.max(1, Math.round((img.naturalWidth || maxW) * scale))
-        const h = Math.max(1, Math.round((img.naturalHeight || maxW) * scale))
-        const canvas = document.createElement('canvas')
-        canvas.width = w; canvas.height = h
-        const ctx = canvas.getContext('2d')
-        if (!ctx) { resolve(dataUrl); return }
-        ctx.drawImage(img, 0, 0, w, h)
-        resolve(canvas.toDataURL('image/jpeg', 0.82))
-      } catch {
-        resolve(dataUrl)
-      }
-    }
-    img.onerror = () => resolve(dataUrl)
-    img.src = dataUrl
-  })
-}
-
 // Pull an image data URL out of a drop from any of the app's drag sources:
 // a Prompt Manager Pro image (carries its own data URL), a Studio Assets /
 // Downloads Browser file, a Create-gallery asset, or an OS file drop.
@@ -1203,8 +1177,8 @@ async function dataUrlFromImageDrop(e: React.DragEvent): Promise<string | null> 
 }
 
 function PromptsPanel({
-  ctl, onCopy, onInject, flash, wide = false,
-}: { ctl: SectionCtl; onCopy: (t: string) => void; onInject: (t: string) => void; flash: (m: string) => void; wide?: boolean }) {
+  ctl, onCopy, onInject, onInjectImage, flash, wide = false,
+}: { ctl: SectionCtl; onCopy: (t: string) => void; onInject: (t: string) => void; onInjectImage: (path: string) => void; flash: (m: string) => void; wide?: boolean }) {
   const [folders, setFolders] = useState<GpmPromptFolder[]>([])
   const [search, setSearch] = useState('')
   const [newFolder, setNewFolder] = useState('')
@@ -1221,6 +1195,11 @@ function PromptsPanel({
     void loadAllPromptThumbs().then(setThumbs)
   }
   useEffect(reload, [])
+  // Claude's save_prompt writes to the same store; pick its additions up so the next edit here keeps them.
+  useEffect(() => {
+    window.addEventListener(GPM_PROMPTS_CHANGED, reload)
+    return () => window.removeEventListener(GPM_PROMPTS_CHANGED, reload)
+  }, [])
 
   const persist = (next: GpmPromptFolder[]) => { setFolders(next); void savePromptFolders(next) }
   const addFolder = () => { const n = newFolder.trim(); if (!n) return; persist([{ id: gpmId(), name: n, prompts: [] }, ...folders]); setNewFolder('') }
@@ -1367,7 +1346,10 @@ function PromptsPanel({
                         {p.text || <span style={{ color: C.faint }}>(empty)</span>}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        <button onClick={() => onInject(p.text)} className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold" style={{ background: C.green, color: '#fff' }}><Send size={11} />Inject</button>
+                        <button onClick={() => { onInject(p.text); void getPromptImagePath(p.id).then((path) => {
+                          if (path) { onInjectImage(path); flash('Prompt and image injected') }
+                          else if (thumbs[p.id]) flash('Prompt injected. No original image stored for this one: save it again from Claude to keep the image.')
+                        }).catch(() => flash('Prompt injected. Could not read the saved image.')) }} title={thumbs[p.id] ? 'Inject the prompt, and its saved image as the first frame' : 'Inject the prompt'} className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold" style={{ background: C.green, color: '#fff' }}><Send size={11} />Inject</button>
                         <button onClick={() => onCopy(p.text)} className="flex items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: C.card, color: C.text, border: `1px solid ${C.border}` }}><Copy size={11} />Copy</button>
                         <button onClick={() => { setEditId(p.id); setDraft(p.text) }} className="flex items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: C.card, color: C.muted, border: `1px solid ${C.border}` }}><Pencil size={11} />Edit</button>
                         <button onClick={() => deletePrompt(f.id, p.id)} className="flex items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: C.card, color: C.muted, border: `1px solid ${C.border}` }}><Trash2 size={11} />Delete</button>
@@ -1730,7 +1712,7 @@ function Dock({ onClose }: { onClose: () => void }) {
       {tab === 'shot' && <ShotPanel shot={shot} setShot={setShot} ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onUseImage={sendImageToGenSpace} flash={flash} srcImage={shotSrcImage} setSrcImage={setShotSrcImage} />}
       {tab === 'camera' && <CameraPanel search={search} setSearch={setSearch} camCat={camCat} setCamCat={setCamCat} onInject={injectIntoPrompt} flash={flash} />}
       {tab === 'workflow' && <WorkflowPanel wf={wf} setWf={setWf} perfText={perfText} ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onUseImage={sendImageToGenSpace} flash={flash} />}
-      {tab === 'prompts' && <PromptsPanel ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} flash={flash} wide={wide} />}
+      {tab === 'prompts' && <PromptsPanel ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onInjectImage={(path) => { if (injectTarget !== 'qwen') setGenSpaceInputImagePath(path) }} flash={flash} wide={wide} />}
       {tab === 'images' && <ImagesPanel ctl={ctl} onCopy={copyText} onUse={sendImageToGenSpace} flash={flash} />}
       {tab === 'plates' && <PlatesPanel onUse={sendImageToGenSpace} flash={flash} activeId={platesActiveId} setActiveId={setPlatesActiveId} sceneLens={sceneLens} setSceneLens={setSceneLens} sceneAimRef={sceneAimRef} />}
       {tab === 'qwenAngle' && <QwenMultiAnglePanel state={qwenAngleState} setState={setQwenAngleState} onUse={sendImageToGenSpace} flash={flash} injectTarget={injectTarget} setInjectTarget={setInjectTarget} />}

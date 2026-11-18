@@ -4,7 +4,9 @@
  * renderer, which lands here. The mounted Generate screen registers a target, so
  * the prompt goes through the same undo/redo history as an Enhance result.
  */
-type PromptTarget = (prompt: string) => void
+/** Optional hints from Claude for the "save to library?" dialog RiX opens after the prompt lands. */
+export interface GenerationPromptMeta { imagePath?: string; folder?: string; thumbnailOnly?: boolean }
+type PromptTarget = (prompt: string, meta: GenerationPromptMeta) => void
 
 // On globalThis so a dev hot-reload of this file doesn't drop the mounted screen's registration.
 const registry = ((globalThis as Record<string, unknown>).__rixGenPromptTarget ??= { target: null }) as {
@@ -19,11 +21,11 @@ export function registerGenerationPromptTarget(target: PromptTarget): () => void
   return () => { if (registry.target === target) registry.target = previous }
 }
 
-export function setGenerationPrompt(prompt: unknown): { ok: true; chars: number } {
+export function setGenerationPrompt(prompt: unknown, meta: GenerationPromptMeta = {}): { ok: true; chars: number } {
   if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('"prompt" is required and must be non-empty text.')
   if (!registry.target) {
     throw new Error('The RiX Generate screen is not open. Ask the user to open Generate in RiX, then retry.')
   }
-  registry.target(prompt.trim())
+  registry.target(prompt.trim(), meta)
   return { ok: true, chars: prompt.trim().length }
 }

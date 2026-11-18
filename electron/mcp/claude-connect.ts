@@ -12,9 +12,10 @@ import { logger } from '../logger'
  *   1. registers this install's MCP endpoint (url + bearer token) as a user-scope
  *      MCP server named "rix-editor" in Claude Code;
  *   2. installs the bundled skills (rix-editor, rix-prompt, rix-prompt-sheet) into ~/.claude/skills;
- *   3. allows the two calls "Prompt with Claude" needs (inspect_media, set_generation_prompt) and its
- *      two skills in ~/.claude/settings.json, so Claude doesn't ask before each step. Neither call
- *      generates, edits or deletes anything. The editor's cut/export tools still ask.
+ *   3. allows the calls "Prompt with Claude" needs (inspect_media, set_generation_prompt, plus
+ *      list_prompt_folders / save_prompt for the "save this prompt?" step) and its two skills in
+ *      ~/.claude/settings.json, so Claude doesn't ask before each step. None of them generates,
+ *      edits or deletes anything (save_prompt only adds a prompt, and only after the user says yes in chat). The editor's cut/export tools still ask.
  * Only runs when the user clicks Connect. Everything it writes is listed in the UI.
  */
 
@@ -32,6 +33,9 @@ const claudeSettingsPath = () => path.join(os.homedir(), '.claude', 'settings.js
 const ALLOW_RULES = [
   `mcp__${SERVER_NAME}__inspect_media`,
   `mcp__${SERVER_NAME}__set_generation_prompt`,
+  // The skills only call these after the user says yes to "save this prompt?" in chat.
+  `mcp__${SERVER_NAME}__list_prompt_folders`,
+  `mcp__${SERVER_NAME}__save_prompt`,
   'Skill(rix-prompt)',
   'Skill(rix-prompt-sheet)',
 ]

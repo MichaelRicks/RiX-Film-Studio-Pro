@@ -15,10 +15,19 @@ timeline to check here.
    Look before you write; the file name and the user's words are not the image.
 2. Write ONE prompt following the recipe below.
 3. Call `set_generation_prompt` with the prompt text only: no title, no quotes around it, no notes.
+   Also pass `image_path` (the reference image's absolute path) and `folder` (a suggested Prompt
+   Manager folder: the character or project name from the idea).
 4. Reply in a few lines: the shot count, the duration to set (below), and anything in the image you
    had to guess or left out on purpose (an odd hand, unreadable text). Do not generate anything.
 
 If the tool says the Generate screen isn't open, give the user the prompt in a code block instead.
+
+## Saving it
+RiX opens its own "Save this prompt?" dialog as soon as `set_generation_prompt` lands, with your suggested
+folder preselected; the reference image becomes the thumbnail, and Inject later loads it as the
+first frame again. So do NOT ask about saving in chat and do not call `save_prompt` unless the user
+asks you to. If they ask for changes, revise and call `set_generation_prompt` again (the dialog
+reopens for the new version). End your reply by saying the save dialog is waiting in RiX.
 
 ## The recipe (this is what makes the cuts hold together)
 **Shot 1 describes the image exactly as it is.** The image becomes the first frame, so the first

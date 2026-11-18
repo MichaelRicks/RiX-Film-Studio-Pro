@@ -24,11 +24,19 @@ Don't call `rix_status`: there is no project or timeline to check here.
    Left Column...) and whether it is a Character, Prop, or Setting. Read any printed notes (wardrobe,
    age, personality) and use them as extra detail.
 3. Write the prompt in the two-part format below.
-4. Call `set_generation_prompt` with the prompt text only.
+4. Call `set_generation_prompt` with the prompt text only, plus `image_path` (the sheet's absolute
+   path), `thumbnail_only: true` (the sheet is never a first frame) and `folder` (a suggestion: the
+   character or project name, or "Reference Sheets").
 5. Reply in a few lines: panels found, shot count, the duration to set, and anything you guessed
    or left out (unreadable text, odd hands, a panel that was unclear). Do not generate anything.
 
 If the tool says the Generate screen isn't open, give the prompt in a code block instead.
+
+## Saving it
+RiX opens its own "Save this prompt?" dialog as soon as `set_generation_prompt` lands, with your suggested
+folder preselected and the sheet as the thumbnail. So do NOT ask about saving in chat and do not call
+`save_prompt` unless the user asks you to. If they ask for changes, revise and call
+`set_generation_prompt` again. End your reply by saying the save dialog is waiting in RiX.
 
 ## Format (always both parts, in this order, plain text)
 

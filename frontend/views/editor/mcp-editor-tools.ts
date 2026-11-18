@@ -12,6 +12,7 @@ import { DEFAULT_TEXT_STYLE, transitionTypeValues } from '../../types/project-mo
 import { addGenericAssetToProject } from '../../lib/asset-copy'
 import { pathToFileUrl } from '../../lib/file-url'
 import { setGenerationPrompt } from '../../lib/generation-prompt-bridge'
+import { listPromptFolders, savePromptToLibrary } from '../../lib/prompt-library-bridge'
 import type { EditorState } from './editor-state'
 import type { EditorStoreApi } from './editor-store'
 import * as actions from './editor-actions'
@@ -679,7 +680,13 @@ function revealSteps(results: Array<Record<string, unknown>>, finalClips: Timeli
 export async function handleMcpEditorRequest(tool: string, args: Record<string, unknown>): Promise<unknown> {
   switch (tool) {
     case 'status': return status()
-    case 'set_generation_prompt': return setGenerationPrompt(args.prompt)
+    case 'set_generation_prompt': return setGenerationPrompt(args.prompt, {
+      imagePath: typeof args.image_path === 'string' ? args.image_path : undefined,
+      folder: typeof args.folder === 'string' ? args.folder : undefined,
+      thumbnailOnly: args.thumbnail_only === true,
+    })
+    case 'list_prompt_folders': return listPromptFolders()
+    case 'save_prompt': return savePromptToLibrary(args)
     case 'list_project_assets': return listProjectAssets(args)
     case 'get_timeline': return getTimeline()
     case 'export_payload': return exportPayload()
