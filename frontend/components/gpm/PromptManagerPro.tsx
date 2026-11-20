@@ -20,7 +20,7 @@ import {
 import { useProjects } from '@/contexts/ProjectContext'
 import {
   type GpmPromptFolder, type GpmImageFolder, type GpmImage, gpmId,
-  loadPromptFolders, savePromptFolders, loadImageFolders, saveImageFolders,
+  setPromptImagePath, loadPromptFolders, savePromptFolders, loadImageFolders, saveImageFolders,
   loadImages, putImage, deleteImage, exportBackup, importBackup, parseBackup,
   loadAllPromptThumbs, setPromptThumb, deletePromptThumb, downscaleToThumb, getPromptImagePath, GPM_PROMPTS_CHANGED,
   type GpmWorkflow, loadWorkflows, saveWorkflows,
@@ -1151,9 +1151,11 @@ function BackupRow({ onAfterImport, flash }: { onAfterImport: () => void; flash:
 // Pull an image data URL out of a drop from any of the app's drag sources:
 // a Prompt Manager Pro image (carries its own data URL), a Studio Assets /
 // Downloads Browser file, a Create-gallery asset, or an OS file drop.
-async function dataUrlFromImageDrop(e: React.DragEvent): Promise<string | null> {
+// `path` is the full-size original on disk when the drag source has one (null for an in-app
+// library image or an OS drop without a resolvable path): that is what Inject loads as the first frame.
+async function dataUrlFromImageDrop(e: React.DragEvent): Promise<{ dataUrl: string; path: string | null; name: string } | null> {
   const gpm = e.dataTransfer.getData(GPM_IMAGE_DND_TYPE)
-  if (gpm) { const d = JSON.parse(gpm) as GpmDndImage; return d.dataUrl }
+  if (gpm) { const d = JSON.parse(gpm) as GpmDndImage; return { dataUrl: d.dataUrl, path: null, name: d.name } }
   const fileRaw = e.dataTransfer.getData(FILE_DND)
   const assetRaw = fileRaw ? '' : e.dataTransfer.getData('asset')
   const path = fileRaw
@@ -1163,15 +1165,16 @@ async function dataUrlFromImageDrop(e: React.DragEvent): Promise<string | null> 
       : null
   if (path) {
     const r = await window.electronAPI?.gpmLibReadAsDataUrl?.({ path })
-    return r?.success ? r.dataUrl : null
+    return r?.success ? { dataUrl: r.dataUrl, path, name: path.split(/[/\\]/).pop() ?? 'ref' } : null
   }
   const file = e.dataTransfer.files?.[0]
   if (file?.type.startsWith('image/')) {
-    return await new Promise<string>((res, rej) => {
+    const dataUrl = await new Promise<string>((res, rej) => {
       const reader = new FileReader()
       reader.onload = () => res(String(reader.result)); reader.onerror = () => rej(reader.error)
       reader.readAsDataURL(file)
     })
+    return { dataUrl, path: window.electronAPI?.getPathForFile(file) || null, name: file.name }
   }
   return null
 }
@@ -1219,10 +1222,12 @@ function PromptsPanel({
     e.preventDefault()
     setDragThumbId(null)
     try {
-      const dataUrl = await dataUrlFromImageDrop(e)
-      if (!dataUrl) return
-      const thumb = await downscaleToThumb(dataUrl)
+      const dropped = await dataUrlFromImageDrop(e)
+      if (!dropped) return
+      const thumb = await downscaleToThumb(dropped.dataUrl)
       await setPromptThumb(pid, thumb)
+      // Keep the full-size image so Inject can load it as the first frame (the thumb is too small).
+      await setPromptImagePath(pid, dropped.path ?? await saveDataUrlToTempFile(dropped.dataUrl, dropped.name))
       setThumbs((t) => ({ ...t, [pid]: thumb }))
       flash('Visual cue attached')
     } catch {
@@ -1348,7 +1353,14 @@ function PromptsPanel({
                       <div className="flex flex-wrap gap-1.5">
                         <button onClick={() => { onInject(p.text); void getPromptImagePath(p.id).then((path) => {
                           if (path) { onInjectImage(path); flash('Prompt and image injected') }
-                          else if (thumbs[p.id]) flash('Prompt injected. No original image stored for this one: save it again from Claude to keep the image.')
+                          else if (thumbs[p.id]) {
+                            // Older cue with no stored original: fall back to the 360px thumbnail so the image still loads.
+                            void saveDataUrlToTempFile(thumbs[p.id], 'cue').then(async (tp) => {
+                              await setPromptImagePath(p.id, tp)
+                              onInjectImage(tp)
+                              flash('Prompt injected with the small thumbnail. Drop the original image on this card again for full quality.')
+                            }).catch(() => flash('Prompt injected. Could not load the image.'))
+                          }
                         }).catch(() => flash('Prompt injected. Could not read the saved image.')) }} title={thumbs[p.id] ? 'Inject the prompt, and its saved image as the first frame' : 'Inject the prompt'} className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-semibold" style={{ background: C.green, color: '#fff' }}><Send size={11} />Inject</button>
                         <button onClick={() => onCopy(p.text)} className="flex items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: C.card, color: C.text, border: `1px solid ${C.border}` }}><Copy size={11} />Copy</button>
                         <button onClick={() => { setEditId(p.id); setDraft(p.text) }} className="flex items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: C.card, color: C.muted, border: `1px solid ${C.border}` }}><Pencil size={11} />Edit</button>

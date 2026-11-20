@@ -13,7 +13,7 @@
 // ---- Contract value types (mirror of api_types.py) --------------------------
 
 export type LtxResolution = "540p" | "720p" | "1080p" | "1440p" | "2160p";
-export type LtxDuration = 5 | 6 | 8 | 10 | 12 | 14 | 16 | 18 | 20;
+export type LtxDuration = 5 | 6 | 8 | 10 | 12 | 14 | 15 | 16 | 18 | 20;
 export type LtxFps = 24 | 25 | 48 | 50;
 export type LtxPipeline = "fast" | "pro";
 export type LtxAspectRatio = "16:9" | "9:16";

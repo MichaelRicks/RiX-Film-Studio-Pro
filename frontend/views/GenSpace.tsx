@@ -5,7 +5,7 @@ import {
   Heart, Film, Volume2, VolumeX, Sparkles, Sparkle,
   Clock, Monitor, ChevronUp, Scissors, Music, Undo2, Redo2, Loader2,
   ChevronLeft, ChevronRight, Copy, Check, Tag, Eraser, Square, MoveHorizontal, Wand2, Rows3, RefreshCw, Clapperboard,
-  CheckSquare, Lock, Dices, History, Shuffle, RectangleVertical, ListPlus,
+  CheckSquare, Lock, Dices, History, Shuffle, RectangleVertical, ListPlus, BookmarkPlus,
 } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import type { GenSpaceRetakeSource } from '../contexts/ProjectContext'
@@ -862,6 +862,7 @@ function PromptBar({
   enhanceProvider,
   onEnhanceProviderChange,
   onPromptWithClaude,
+  onSavePrompt,
   canUndoPrompt,
   onUndoPrompt,
   canRedoPrompt,
@@ -945,6 +946,7 @@ function PromptBar({
   enhanceProvider?: 'local' | 'api'
   onEnhanceProviderChange?: (provider: 'local' | 'api') => void
   onPromptWithClaude?: () => void
+  onSavePrompt?: () => void
   canUndoPrompt?: boolean
   onUndoPrompt?: () => void
   canRedoPrompt?: boolean
@@ -1737,6 +1739,20 @@ function PromptBar({
           >
             <Sparkles className="h-3.5 w-3.5" />
             Prompt with Claude
+          </button>
+        )}
+
+        {/* Save the current prompt to a Prompt Manager folder (same dialog Claude's prompts use). */}
+        {onSavePrompt && (
+          <button
+            type="button"
+            onClick={onSavePrompt}
+            disabled={!prompt.trim()}
+            title="Save this prompt to a Prompt Manager folder"
+            className="flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-zinc-300 hover:bg-zinc-800 flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <BookmarkPlus className="h-3.5 w-3.5" />
+            Save prompt
           </button>
         )}
 
@@ -5044,6 +5060,7 @@ export function GenSpace() {
           enhanceProvider={canToggleEnhanceProvider ? enhanceProvider : undefined}
           onEnhanceProviderChange={handleEnhanceProviderChange}
           onPromptWithClaude={mode === 'video' ? () => setPromptWithClaudeOpen(true) : undefined}
+          onSavePrompt={() => setSavePromptOffer({ prompt: prompt.trim(), imagePath: inputImage ?? undefined })}
           canUndoPrompt={canUndoPrompt}
           onUndoPrompt={handleUndoPrompt}
           canRedoPrompt={canRedoPrompt}
