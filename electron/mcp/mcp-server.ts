@@ -12,6 +12,7 @@ import { callEditor, registerEditorBridge } from './editor-bridge'
 import { handle } from '../ipc/typed-handle'
 import { getMainWindow } from '../window'
 import { claudeConnectStatus, connectClaude, disconnectClaude } from './claude-connect'
+import { startClaudeRun, cancelClaudeRun, stopAllClaudeRuns, claudeAuthStatus, claudeAuthLogin } from './claude-runner'
 import { analyzeAudio, probeMedia, sampleFrames, type Frame } from './media-tools'
 
 /**
@@ -442,7 +443,7 @@ export function startMcpServer(): void {
   registerEditorBridge()
   registerMcpIpc()
   if (forcedOn() || loadConfig().enabled) listen()
-  app.on('before-quit', () => { server?.close(); server = null })
+  app.on('before-quit', () => { server?.close(); server = null; stopAllClaudeRuns() })
 }
 
 function registerMcpIpc(): void {
@@ -489,6 +490,12 @@ function registerMcpIpc(): void {
       return { success: false as const, error: e instanceof Error ? e.message : String(e) }
     }
   })
+
+  // "Prompt with Claude" without leaving RiX: run the user's own Claude Code in the background.
+  handle('claudeRunStart', ({ prompt, sessionId }) => startClaudeRun({ prompt, sessionId }))
+  handle('claudeAuthStatus', () => claudeAuthStatus())
+  handle('claudeAuthLogin', () => claudeAuthLogin())
+  handle('claudeRunCancel', ({ runId }) => { cancelClaudeRun(runId); return { success: true as const } })
 
   // "Edit with Claude": open Claude Desktop's Code tab with the brief PREFILLED (the
   // user reviews and presses Send). The link runs on the user's own Claude plan — RiX

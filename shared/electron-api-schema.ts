@@ -483,6 +483,26 @@ export const electronAPISchemas = {
     input: z.object({}),
     output: emptyResult,
   },
+  // "Prompt with Claude" in the background: run the user's own Claude Code with the brief (or a
+  // follow-up in an existing session) and stream progress via onClaudeRunEvent.
+  claudeRunStart: {
+    input: z.object({ prompt: z.string(), sessionId: z.string().optional() }),
+    output: ipcResult({ runId: z.string() }),
+  },
+  claudeRunCancel: {
+    input: z.object({ runId: z.string() }),
+    output: emptyResult,
+  },
+  // Background runs need the Claude Code program signed in on its own (Claude Desktop's login is not shared).
+  claudeAuthStatus: {
+    input: z.object({}),
+    output: z.object({ cliFound: z.boolean(), loggedIn: z.boolean() }),
+  },
+  // Opens the browser to sign in to the user's Claude subscription; resolves when sign-in finishes.
+  claudeAuthLogin: {
+    input: z.object({}),
+    output: emptyResult,
+  },
   // "Edit with Claude": open Claude Desktop's Code tab with this brief prefilled.
   openClaudeCode: {
     input: z.object({ prompt: z.string() }),
@@ -749,7 +769,18 @@ export interface McpEditorRequest {
   args: Record<string, unknown>
 }
 
+/** Progress of a background Claude run (see claudeRunStart). */
+export interface ClaudeRunEvent {
+  runId: string
+  kind: 'session' | 'status' | 'done' | 'error'
+  /** status: a short line; done: Claude's final reply; error: what went wrong. */
+  text?: string
+  /** The Claude session, so a follow-up can continue it. */
+  sessionId?: string
+}
+
 export type ElectronAPI = InvokeAPI & {
+  onClaudeRunEvent: (cb: (e: ClaudeRunEvent) => void) => (() => void)
   onMcpEditorRequest: (cb: (req: McpEditorRequest) => void) => (() => void)
   onPythonSetupProgress: (cb: (data: unknown) => void) => void
   removePythonSetupProgress: () => void

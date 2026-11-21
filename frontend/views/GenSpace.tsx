@@ -4044,7 +4044,27 @@ export function GenSpace() {
           : []
       }),
     )
+    return startImage
   }, [sanitizeVideoSettings, loraLibrary.items, appSettings.modelsDir, updateAppSettings, currentProjectId])
+
+  // "Revise with Claude" from the enlarged viewer: load this clip's prompt, first frame and
+  // settings into Create (same as Regenerate), then open Prompt with Claude in Revise mode with
+  // this clip as the video Claude can look at. The modal opens once the loaded prompt has landed,
+  // so it starts from the right text.
+  const [claudeVideoPath, setClaudeVideoPath] = useState<string | null>(null)
+  const [pendingClaudeRevise, setPendingClaudeRevise] = useState<{ prompt: string; videoPath: string } | null>(null)
+  const reviseAssetWithClaude = useCallback(async (asset: Asset) => {
+    const params = asset.generationParams
+    if (!params) return
+    await handleRegenerate(asset)
+    setPendingClaudeRevise({ prompt: params.prompt, videoPath: asset.path })
+  }, [handleRegenerate])
+  useEffect(() => {
+    if (!pendingClaudeRevise || prompt !== pendingClaudeRevise.prompt) return
+    setClaudeVideoPath(pendingClaudeRevise.videoPath)
+    setPendingClaudeRevise(null)
+    setPromptWithClaudeOpen(true)
+  }, [pendingClaudeRevise, prompt])
 
   // Reframe: crop the source to the chosen 9:16 rect, import the result into the
   // project and add it to the gallery beside the original (same prompt + tag), and
@@ -5035,7 +5055,8 @@ export function GenSpace() {
           <PromptWithClaudeModal
             imagePath={inputImage}
             existingPrompt={prompt}
-            onClose={() => setPromptWithClaudeOpen(false)}
+            lastVideoPath={claudeVideoPath ?? videoPath}
+            onClose={() => { setPromptWithClaudeOpen(false); setClaudeVideoPath(null) }}
           />
         )}
 
@@ -5266,6 +5287,16 @@ export function GenSpace() {
                 >
                   <RefreshCw className="h-4 w-4" />
                   Regenerate
+                </button>
+              )}
+              {selectedAsset.type === 'video' && canRegenerateAsset(selectedAsset) && (
+                <button
+                  onClick={() => { const a = selectedAsset; setSelectedAsset(null); void reviseAssetWithClaude(a) }}
+                  title="Have Claude revise this clip's prompt: it loads the prompt back into Create and lets Claude look at the video"
+                  className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium flex items-center gap-2 transition-colors"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Revise with Claude
                 </button>
               )}
               {selectedAsset.type === 'video' && (

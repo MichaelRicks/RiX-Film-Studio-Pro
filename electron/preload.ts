@@ -1,4 +1,4 @@
-import { electronAPISchemas, type BackendHealthStatus, type UpdateStatePayload, type ExportProgress, type McpEditorRequest } from '../shared/electron-api-schema'
+import { electronAPISchemas, type BackendHealthStatus, type UpdateStatePayload, type ExportProgress, type McpEditorRequest, type ClaudeRunEvent } from '../shared/electron-api-schema'
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
@@ -46,6 +46,12 @@ api.onGpmLibChanged = (cb: () => void) => {
   return () => {
     ipcRenderer.removeListener('gpm-lib-changed', listener)
   }
+}
+
+api.onClaudeRunEvent = (cb: (e: ClaudeRunEvent) => void) => {
+  const listener = (_: unknown, e: ClaudeRunEvent) => cb(e)
+  ipcRenderer.on('claude-run-event', listener)
+  return () => ipcRenderer.removeListener('claude-run-event', listener)
 }
 
 api.onMcpEditorRequest = (cb: (req: McpEditorRequest) => void) => {

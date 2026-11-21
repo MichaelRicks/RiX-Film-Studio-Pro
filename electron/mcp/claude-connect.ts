@@ -21,7 +21,8 @@ import { logger } from '../logger'
 
 // rix-editor: cutting/exporting in the Video Editor. rix-prompt: "Prompt with Claude" on Generate.
 // rix-prompt-sheet: the same, when the image is a character/reference sheet.
-const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-prompt-sheet'] as const
+// rix-lens: the Natural / Cinematic / Blockbuster look and flare switch picked in that same dialog.
+const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-prompt-sheet', 'rix-lens'] as const
 type SkillName = (typeof SKILL_NAMES)[number]
 // Dev builds register under their own name: they have a different token than an
 // installed build on the same machine, and sharing one name would make each
@@ -30,7 +31,7 @@ const SERVER_NAME = isDev ? 'rix-editor-dev' : 'rix-editor'
 
 const claudeConfigPath = () => path.join(os.homedir(), '.claude.json')
 const claudeSettingsPath = () => path.join(os.homedir(), '.claude', 'settings.json')
-const ALLOW_RULES = [
+export const ALLOW_RULES = [
   `mcp__${SERVER_NAME}__inspect_media`,
   `mcp__${SERVER_NAME}__set_generation_prompt`,
   // The skills only call these after the user says yes to "save this prompt?" in chat.
@@ -38,6 +39,7 @@ const ALLOW_RULES = [
   `mcp__${SERVER_NAME}__save_prompt`,
   'Skill(rix-prompt)',
   'Skill(rix-prompt-sheet)',
+  'Skill(rix-lens)',
 ]
 const skillDir = (name: SkillName) => path.join(os.homedir(), '.claude', 'skills', name)
 const skillPath = (name: SkillName) => path.join(skillDir(name), 'SKILL.md')
@@ -51,12 +53,25 @@ const sha = (file: string): string | null => {
 
 /** A runnable Claude Code CLI binary, or null. `.cmd` shims are skipped (they need a
  *  shell, and the auth header contains spaces) — the config-file path covers those. */
-function findClaudeCli(): string | null {
+export function findClaudeCli(): string | null {
   const exe = process.platform === 'win32' ? 'claude.exe' : 'claude'
   const candidates: string[] = []
   const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['claude'], { encoding: 'utf8', timeout: 5000 })
   if (which.status === 0) candidates.push(...which.stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean))
   candidates.push(path.join(os.homedir(), '.local', 'bin', exe))
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    // Microsoft Store build of Claude Desktop: %LOCALAPPDATA%\Claude-Data\<package>\claude-code\<version>\<hash>\claude.exe
+    const dataRoot = path.join(process.env.LOCALAPPDATA, 'Claude-Data')
+    const byVersion = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true })
+    try {
+      for (const pkg of fs.readdirSync(dataRoot)) {
+        const codeRoot = path.join(dataRoot, pkg, 'claude-code')
+        for (const v of fs.readdirSync(codeRoot).sort(byVersion)) {
+          for (const h of fs.readdirSync(path.join(codeRoot, v))) candidates.push(path.join(codeRoot, v, h, exe))
+        }
+      }
+    } catch { /* not a Store install */ }
+  }
   if (process.platform === 'win32' && process.env.APPDATA) {
     // Claude Desktop bundles the CLI per version: %APPDATA%\Claude\claude-code\<version>\claude.exe
     const root = path.join(process.env.APPDATA, 'Claude', 'claude-code')
