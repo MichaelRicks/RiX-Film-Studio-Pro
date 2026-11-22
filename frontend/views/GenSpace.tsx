@@ -220,6 +220,21 @@ function AssetCard({
     }
   }, [timelineMenu])
   const hoverVideoRef = useRef<HTMLVideoElement>(null)
+  // Short cards (21:9 and wider) don't have room for the stacked, labelled chips: the last row
+  // (Regenerate) got cut off at the bottom. Below this height the chips collapse to icon-only
+  // (tooltips keep the names) so they all fit in one or two rows.
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [short, setShort] = useState(false)
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setShort(el.clientHeight > 0 && el.clientHeight < 140))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const chipCls = short
+    ? 'p-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center text-xs font-medium whitespace-nowrap'
+    : 'px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap'
   const [isHovered, setIsHovered] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [isMuted, setIsMuted] = useState(true)
@@ -288,6 +303,7 @@ function AssetCard({
 
   return (
     <div
+      ref={cardRef}
       data-asset-id={asset.id}
       className={`relative group cursor-pointer rounded-xl overflow-hidden bg-zinc-900 ${
         selectMode && selected ? 'ring-2 ring-accent ring-offset-2 ring-offset-zinc-950' : ''
@@ -407,17 +423,19 @@ function AssetCard({
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); onCreateVideo?.(asset) }}
-                  className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+                  title={short ? 'Create video' : undefined}
+                  className={chipCls}
                 >
                   <Film className="h-3 w-3" />
-                  Create video
+                  <span className={short ? 'sr-only' : undefined}>Create video</span>
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); onEditImage?.(asset) }}
-                  className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+                  title={short ? 'Edit image' : undefined}
+                  className={chipCls}
                 >
                   <Wand2 className="h-3 w-3" />
-                  Edit image
+                  <span className={short ? 'sr-only' : undefined}>Edit image</span>
                 </button>
               </>
             )}
@@ -426,38 +444,41 @@ function AssetCard({
                 {onRetake && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onRetake(asset) }}
-                    className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+                    title={short ? 'Retake' : undefined}
+                    className={chipCls}
                   >
                     <Scissors className="h-3 w-3" />
-                    Retake
+                    <span className={short ? 'sr-only' : undefined}>Retake</span>
                   </button>
                 )}
                 {onExtend && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onExtend(asset) }}
-                    className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+                    title={short ? 'Extend' : undefined}
+                    className={chipCls}
                   >
                     <MoveHorizontal className="h-3 w-3" />
-                    Extend
+                    <span className={short ? 'sr-only' : undefined}>Extend</span>
                   </button>
                 )}
                 {onContinue && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onContinue(asset) }}
                     title="Continue as a new clip — seeds a fresh generation from this shot's last frame"
-                    className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+                    className={chipCls}
                   >
                     <Clapperboard className="h-3 w-3" />
-                    Continue
+                    <span className={short ? 'sr-only' : undefined}>Continue</span>
                   </button>
                 )}
                 {onIcLora && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onIcLora(asset) }}
-                    className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+                    title={short ? 'IC-LoRA' : undefined}
+                    className={chipCls}
                   >
                     <Sparkles className="h-3 w-3" />
-                    IC-LoRA
+                    <span className={short ? 'sr-only' : undefined}>IC-LoRA</span>
                   </button>
                 )}
               </>
@@ -468,10 +489,10 @@ function AssetCard({
             <button
               onClick={(e) => { e.stopPropagation(); onRegenerate(asset) }}
               title="Load this generation's image, prompt and settings back into Create"
-              className="px-2.5 py-1.5 rounded-lg bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-colors flex items-center gap-1.5 text-xs font-medium whitespace-nowrap"
+              className={chipCls}
             >
               <RefreshCw className="h-3 w-3" />
-              Regenerate
+              <span className={short ? 'sr-only' : undefined}>Regenerate</span>
             </button>
           )}
           </div>
