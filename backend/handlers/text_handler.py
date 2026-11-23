@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from runtime_config.runtime_config import RuntimeConfig
 
 
+# The LTX API rejects prompts longer than this (HTTP 400), so check before calling it.
+API_PROMPT_CHAR_LIMIT = 5000
+
+
 class TextHandler(StateHandlerBase):
     def __init__(self, state: AppState, lock: RLock, config: RuntimeConfig) -> None:
         super().__init__(state, lock, config)
@@ -112,6 +116,13 @@ class TextHandler(StateHandlerBase):
             )
 
         use_local = self.should_use_local_encoding()
+        if not use_local and len(prompt) > API_PROMPT_CHAR_LIMIT:
+            # The LTX API refuses these with a 400 that the generic failure message below hides.
+            raise RuntimeError(
+                f"Your prompt is {len(prompt):,} characters, but the LTX API accepts at most "
+                f"{API_PROMPT_CHAR_LIMIT:,}. Shorten it by about {len(prompt) - API_PROMPT_CHAR_LIMIT + 200:,} "
+                "characters, or download the local text encoder in Settings (it has no such limit)."
+            )
         gemma_root = self.resolve_gemma_root()
         embeddings = self._prepare_api_embeddings(prompt, enhance_prompt)
 

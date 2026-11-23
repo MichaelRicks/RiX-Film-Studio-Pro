@@ -11,7 +11,8 @@ import { pathToFileUrl } from '../lib/file-url'
  * set_generation_prompt. The user presses Send in Claude, then comes back to review it.
  */
 
-type ShotCount = 2 | 3 | 4
+// 1 = a single continuous shot (reference sheets only; rix-prompt-sheet has a single-shot mode)
+type ShotCount = 1 | 2 | 3 | 4
 // 'first-frame': the image is the opening frame. 'sheet': a character/prop/location reference
 // sheet used only as an ingredient (rix-prompt-sheet skill), never shown or animated.
 type ImageKind = 'first-frame' | 'sheet'
@@ -36,12 +37,25 @@ export interface PromptBrief {
   lookAtResult: boolean
   imagePath: string | null
   imageKind: ImageKind
+  // The sheet is attached as the Ingredients IC-LoRA reference (IC-LoRA mode), not as a first frame.
+  ingredients: boolean
   idea: string
   shots: ShotCount
   dialogue: boolean
   look: Look
-  flare: boolean
+  // Lens flare strength 0 to 1 (0 = off), set with a slider.
+  flare: number
   existingPrompt: string
+}
+
+/** Plain words for the flare slider, so rix-lens knows how strong to make it. */
+function flareWords(v: number): string {
+  if (v <= 0) return 'off'
+  const pct = Math.round(v * 100)
+  if (v <= 0.3) return `${pct}% strength: a barely visible, very faint streak off one light source`
+  if (v <= 0.6) return `${pct}% strength: a thin, faint streak off one light source (keep it off face close-ups)`
+  if (v <= 0.85) return `${pct}% strength: a clearly visible streak off one light source, no blowout (keep it off face close-ups)`
+  return `${pct}% strength: a bold, bright streak off one light source, the strongest you can write without washing out the frame (keep it off face close-ups)`
 }
 
 /** The look lines shared by both modes. 'keep' (Revise only) adds nothing. */
@@ -53,7 +67,7 @@ function lookLines(brief: PromptBrief, sheet: boolean): string[] {
       : []
   }
   return [
-    `Look: ${brief.look === 'cinematic' ? 'Cinematic' : 'Blockbuster'}. Use the rix-lens skill to build the look lock and restate it in the same words in every shot${brief.mode === 'revise' ? ', replacing any look wording already in the prompt' : ''}. Flare: ${brief.flare ? 'on (thin and faint; keep it off face close-ups)' : 'off'}.`,
+    `Look: ${brief.look === 'cinematic' ? 'Cinematic' : 'Blockbuster'}. Use the rix-lens skill to build the look lock and restate it in the same words in every shot${brief.mode === 'revise' ? ', replacing any look wording already in the prompt' : ''}. Flare (scale 0 to 1, see the flare strength section of rix-lens): ${flareWords(brief.flare)}.`,
     ...(brief.imagePath && !sheet ? ['The first-frame image\'s own light and framing win: describe them as they are in shot 1 and add the look from the first cut.'] : []),
   ]
 }
@@ -73,6 +87,7 @@ function buildReviseBrief(brief: PromptBrief): string {
       : []),
     ...lookLines(brief, sheet),
     '',
+    'Keep the whole revised prompt under 4500 characters (the LTX API refuses over 5000).',
     'Reply in one or two lines: what you changed, and the duration to set. Do not generate anything.',
   ].join('\n')
 }
@@ -87,11 +102,16 @@ export function buildPromptBrief(brief: PromptBrief): string {
     '',
     brief.imagePath
       ? sheet
-        ? `Reference sheet (look at it with inspect_media). It is an ingredient only: the video is a NEW scene that borrows the character, props and place from it. Never show or animate the sheet or its panels: ${brief.imagePath}`
+        ? brief.ingredients
+          ? `Reference sheet (look at it with inspect_media, width 1280 or more): ${brief.imagePath}
+It is attached to the Ingredients IC-LoRA as an appearance reference ONLY. Follow the "Ingredients IC-LoRA" section of the skill. The sheet may mix character, outfit, location and prop panels: take from each only what my idea needs. The video is a NEW scene: never show, copy or animate the sheet, its layout, borders, labels or its poses.`
+          : `Reference sheet (look at it with inspect_media). It is an ingredient only: the video is a NEW scene that borrows the character, props and place from it. Never show or animate the sheet or its panels: ${brief.imagePath}`
         : `Reference image (it becomes the first frame; look at it with inspect_media): ${brief.imagePath}`
       : 'Reference image: none. Write the prompt from the idea alone.',
     `Idea: ${brief.idea.trim() || (sheet ? '(none given: invent a fitting location and a simple scene for this character)' : '(none given: pick a simple, fitting scene from the image)')}`,
-    `Shots: ${brief.shots}`,
+    brief.shots === 1
+      ? 'Shots: 1. Use the SINGLE-shot mode of rix-prompt-sheet: one continuous shot, one camera, no cuts.'
+      : `Shots: ${brief.shots}`,
     brief.dialogue
       ? 'Dialogue: include a few short spoken lines if they suit the scene.'
       : 'Dialogue: none. Sound and ambience only.',
@@ -100,6 +120,7 @@ export function buildPromptBrief(brief: PromptBrief): string {
       ? ['', `The prompt box currently says (treat it as rough notes, not as text to keep): ${brief.existingPrompt.trim()}`]
       : []),
     '',
+    'Keep the whole prompt under 4500 characters (the LTX API refuses over 5000).',
     'Write it, call set_generation_prompt, then tell me the shot count and the duration to set. Do not generate anything.',
   ]
   return lines.join('\n')
@@ -116,8 +137,10 @@ interface Run {
 type McpStatus = Awaited<ReturnType<typeof window.electronAPI.mcpGetStatus>>
 type ConnectStatus = Awaited<ReturnType<typeof window.electronAPI.claudeConnectStatus>>
 
-export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath, onClose }: {
+export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath, ingredients = false, onClose }: {
   imagePath: string | null
+  /** IC-LoRA mode with Ingredients: the image is a reference sheet, never a first frame. */
+  ingredients?: boolean
   existingPrompt: string
   /** The video the last generation made, so Revise mode can let Claude look at the result. */
   lastVideoPath?: string | null
@@ -135,8 +158,8 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
   const [brief, setBrief] = useState<PromptBrief>({
     mode: existingPrompt.trim() ? 'revise' : 'new', change: '',
     resultVideoPath: lastVideoPath ?? null, lookAtResult: !!lastVideoPath,
-    imagePath, imageKind: 'first-frame', idea: '', shots: 3, dialogue: true,
-    look: existingPrompt.trim() ? 'keep' : 'natural', flare: false, existingPrompt,
+    imagePath, imageKind: ingredients ? 'sheet' : 'first-frame', ingredients, idea: '', shots: 3, dialogue: true,
+    look: existingPrompt.trim() ? 'keep' : 'natural', flare: 0, existingPrompt,
   })
   const set = <K extends keyof PromptBrief>(k: K, v: PromptBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
 
@@ -206,6 +229,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
     setRun({ runId: r.runId, sessionId, phase: 'running', lines: ['Starting Claude…'], reply: '' })
   }
   const revise = brief.mode === 'revise'
+  const sheetKind = brief.imageKind === 'sheet' && !!imagePath
   const needsChange = revise && !brief.change.trim()
   const setMode = (m: 'new' | 'revise') => setBrief(b => ({ ...b, mode: m, look: m === 'revise' ? 'keep' : (b.look === 'keep' ? 'natural' : b.look) }))
   const writeHere = () => { void startRun(prompt) }
@@ -355,9 +379,9 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
               </div>
             )}
             <div className="space-y-2 min-w-0">
-              {imagePath && (
+              {imagePath && !ingredients && (
                 <div className="flex gap-2">
-                  {([['first-frame', 'First frame'], ['sheet', 'Character sheet']] as [ImageKind, string][]).map(([k, label]) => (
+                  {([['first-frame', 'First frame'], ['sheet', 'Reference sheet (Ingredients)']] as [ImageKind, string][]).map(([k, label]) => (
                     <button key={k} onClick={() => set('imageKind', k)}
                       className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
                         brief.imageKind === k ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
@@ -368,9 +392,13 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
               )}
               <p className="text-xs text-zinc-400 leading-relaxed">
                 {!imagePath
-                  ? 'No first-frame image is set. Claude will write the prompt from your idea alone. Add an image first for the best consistency.'
+                  ? ingredients
+                    ? 'No reference sheet is loaded. Import one above first, so Claude can describe it.'
+                    : 'No first-frame image is set. Claude will write the prompt from your idea alone. Add an image first for the best consistency.'
                   : brief.imageKind === 'sheet'
-                    ? 'Claude will read this sheet for the character, props and place, then write a new scene with them. The sheet itself is only a reference and is kept out of the prompt\'s scene.'
+                    ? ingredients
+                      ? 'Claude will read this sheet (character, outfit, location, props) and write a new scene that uses only the parts your idea needs. The sheet is appearance reference only and is kept out of the picture.'
+                      : 'Claude will read this sheet for the character, props and place, then write a new scene with them. The sheet itself is only a reference and is kept out of the prompt\'s scene.'
                     : 'Claude will look at this image and write shot 1 to match it exactly, then carry the same look through every cut.'}
               </p>
             </div>
@@ -405,12 +433,12 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
           <div>
             <label className={labelCls}>Shots</label>
             <div className="flex gap-2">
-              {([2, 3, 4] as ShotCount[]).map(n => (
+              {((sheetKind ? [1, 2, 3, 4] : [2, 3, 4]) as ShotCount[]).map(n => (
                 <button key={n} onClick={() => set('shots', n)}
                   className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${
                     brief.shots === n ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
                   }`}
-                >{n}</button>
+                >{n === 1 ? 'Single' : n}</button>
               ))}
             </div>
           </div>
@@ -430,10 +458,13 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
             </div>
             <p className="mt-1.5 text-[11px] text-zinc-500 leading-relaxed">{[KEEP_LOOK, ...LOOKS].find(l => l.id === brief.look)?.hint}</p>
             {(brief.look === 'cinematic' || brief.look === 'blockbuster') && (
-              <label className="mt-2 flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-                <input type="checkbox" checked={brief.flare} onChange={(e) => set('flare', e.target.checked)} className="accent-[rgb(var(--accent))]" />
-                Lens flare (thin and faint)
-              </label>
+              <div className="mt-2 flex items-center gap-3 text-sm text-zinc-300">
+                <span className="flex-shrink-0">Lens flare</span>
+                <input type="range" min={0} max={1} step={0.1} value={brief.flare}
+                  onChange={(e) => set('flare', Number(e.target.value))}
+                  className="flex-1 accent-[rgb(var(--accent))]" />
+                <span className="w-10 text-right text-xs text-zinc-400 tabular-nums">{brief.flare <= 0 ? 'Off' : brief.flare.toFixed(1)}</span>
+              </div>
             )}
             {(brief.look === 'cinematic' || brief.look === 'blockbuster') && imagePath && brief.imageKind === 'first-frame' && (
               <p className="mt-1.5 text-[11px] text-amber-300/80 leading-relaxed">

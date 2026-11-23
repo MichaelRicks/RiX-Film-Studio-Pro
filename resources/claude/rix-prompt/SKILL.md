@@ -56,6 +56,21 @@ paragraph in chronological order, roughly 120 to 250 words. No numbered lists, n
 "Shot 1:" labels, no screenplay format, no negative prompts. Concrete and literal beats poetic:
 say what the camera sees and the sound it hears.
 
+**Anatomy and motion (prevents warped limbs and twisting).** The user has seen malformed, twisting
+bodies and limbs, so build this into every prompt, in positive wording only (no negative prompts):
+- Keep movement small and slow: one simple, deliberate action per shot ("slowly turns her head",
+  "her hand rests still on the armrest"). No spins, flips, fast turns, big full-body motion, or
+  several actions at once.
+- State where the limbs are and let them stay put: "both hands resting on the armrests", "arms at her
+  sides", "legs crossed and still". Name the pose once in shot 1 and reuse it at each cut.
+- Add a short anatomy clause to each shot: "natural human proportions, two arms and two legs, fingers
+  relaxed and naturally shaped, smooth natural movement". Hands are the weak spot: prefer hands
+  resting, holding one prop, or out of frame over hands gesturing or crossing.
+- Prefer framings that hide the hard parts (close-ups of the face, wide shots with the body still)
+  over mid-action full-body shots. Avoid crossed or tangled limbs, bodies twisting away from the
+  camera, and people overlapping each other.
+- With armor, props or crowds, keep them still too: "the fallen warriors lie motionless".
+
 **Respect the user's idea.** Use their story, mood and any dialogue they gave. Fill gaps with
 restrained choices that fit the image's look. Don't add new characters unless asked: extra people
 are what breaks consistency. A single character, or one character plus one prop, is safest.

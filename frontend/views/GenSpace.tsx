@@ -31,6 +31,7 @@ import { type IcLoraListItem } from '../hooks/use-catalog'
 import { useIcLoraLibrary } from '../hooks/use-ic-lora-library'
 import { useLoraLibrary } from '../hooks/use-lora-library'
 import { PromptWithClaudeModal } from '../components/PromptWithClaudeModal'
+import { SheetMakerModal } from '../components/SheetMakerModal'
 import { SavePromptDialog } from '../components/SavePromptDialog'
 import { registerGenerationPromptTarget } from '../lib/generation-prompt-bridge'
 import { usePromptEnhancerProvider, type EnhanceProvider } from '../hooks/use-prompt-enhancer-provider'
@@ -2362,6 +2363,8 @@ export function GenSpace() {
   )
   const selectedIcLora = icLoras.find(r => r.ic_lora.id === selectedIcLoraId)?.ic_lora ?? null
   const isCatalogIcLora = selectedIcLora !== null
+  // Ingredients IC-LoRA: its input is a reference sheet, which Prompt with Claude can describe.
+  const isIngredientsMode = mode === 'ic-lora' && selectedIcLora?.id === 'ingredients'
 
   // Default the IC-LoRA picker to Ingredients (vs the built-in Canny Edges) each time IC-LoRA
   // mode is entered from the mode dropdown — saves a click. Wrinkles this handles:
@@ -3506,6 +3509,8 @@ export function GenSpace() {
   // "Prompt with Claude": Claude's set_generation_prompt lands here, on the same undo/redo
   // history as an Enhance result.
   const [promptWithClaudeOpen, setPromptWithClaudeOpen] = useState(false)
+  // Image mode: "Prompt with Claude" asks the reference-sheet questions instead (rix-sheet-maker).
+  const [sheetMakerOpen, setSheetMakerOpen] = useState(false)
   const promptRef = useRef(prompt)
   promptRef.current = prompt
   // After the prompt lands, RiX itself offers to save it (with the reference image) to the library.
@@ -5072,9 +5077,12 @@ export function GenSpace() {
           />
         )}
 
+        {sheetMakerOpen && <SheetMakerModal inputImage={inputImage} onClose={() => setSheetMakerOpen(false)} />}
+
         {promptWithClaudeOpen && (
           <PromptWithClaudeModal
-            imagePath={inputImage}
+            imagePath={isIngredientsMode ? icLoraInput.videoPath : inputImage}
+            ingredients={isIngredientsMode}
             existingPrompt={prompt}
             lastVideoPath={claudeVideoPath ?? videoPath}
             onClose={() => { setPromptWithClaudeOpen(false); setClaudeVideoPath(null) }}
@@ -5101,7 +5109,9 @@ export function GenSpace() {
           onEnhancePrompt={handleEnhancePrompt}
           enhanceProvider={canToggleEnhanceProvider ? enhanceProvider : undefined}
           onEnhanceProviderChange={handleEnhanceProviderChange}
-          onPromptWithClaude={mode === 'video' ? () => setPromptWithClaudeOpen(true) : undefined}
+          onPromptWithClaude={mode === 'video' || isIngredientsMode
+            ? () => setPromptWithClaudeOpen(true)
+            : mode === 'image' ? () => setSheetMakerOpen(true) : undefined}
           onSavePrompt={() => setSavePromptOffer({ prompt: prompt.trim(), imagePath: inputImage ?? undefined })}
           canUndoPrompt={canUndoPrompt}
           onUndoPrompt={handleUndoPrompt}

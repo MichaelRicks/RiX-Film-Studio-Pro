@@ -53,6 +53,15 @@ Blockbuster wides and establishing shots, and OFF in Blockbuster face close-ups 
 flare crossed the face and forehead both times). If the user turns it on for everything, keep it
 thin and faint and say once that it may cross a face.
 
+**Flare strength (slider 0 to 1):** RiX's slider sends a strength, with 0 = off. Map it to words and
+keep the same words in every shot that carries flare:
+- 0.1 to 0.3: "a barely visible, very faint horizontal flare off [source]".
+- 0.4 to 0.6: "one thin faint horizontal flare off [source]" (the default wording below).
+- 0.7 to 0.85: "a clearly visible horizontal streak flare off [source]", no blowout.
+- 0.9 to 1.0: "a bold bright horizontal streak flare off [source] that glows across the lens".
+Above 0.6 the flare is more likely to cross a face: keep it off face close-ups, and say once in
+your reply that it may still drift. A slider value overrides the "thin and faint" defaults here.
+
 Natural needs no lock at all: just write the rix-prompt as usual. Say so, and offer the other two.
 
 ## STAGE 1: Character sheet (image model)

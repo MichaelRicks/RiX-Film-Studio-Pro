@@ -22,7 +22,8 @@ import { logger } from '../logger'
 // rix-editor: cutting/exporting in the Video Editor. rix-prompt: "Prompt with Claude" on Generate.
 // rix-prompt-sheet: the same, when the image is a character/reference sheet.
 // rix-lens: the Natural / Cinematic / Blockbuster look and flare switch picked in that same dialog.
-const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-prompt-sheet', 'rix-lens'] as const
+// rix-sheet-maker: writes the still-image prompts that make the reference sheets for rix-prompt-sheet.
+const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-prompt-sheet', 'rix-lens', 'rix-sheet-maker'] as const
 type SkillName = (typeof SKILL_NAMES)[number]
 // Dev builds register under their own name: they have a different token than an
 // installed build on the same machine, and sharing one name would make each
@@ -40,6 +41,7 @@ export const ALLOW_RULES = [
   'Skill(rix-prompt)',
   'Skill(rix-prompt-sheet)',
   'Skill(rix-lens)',
+  'Skill(rix-sheet-maker)',
 ]
 const skillDir = (name: SkillName) => path.join(os.homedir(), '.claude', 'skills', name)
 const skillPath = (name: SkillName) => path.join(skillDir(name), 'SKILL.md')

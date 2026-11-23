@@ -92,6 +92,55 @@ Keep lines short and in quotes. Describe the voice once, then reuse the descript
 second speaker (only if the sheet has one) a contrasting voice. Off-screen speakers are fine:
 write them as heard, not seen.
 
+## Ingredients IC-LoRA (the sheet is attached as a reference, not a first frame)
+When the brief says the sheet is the Ingredients IC-LoRA reference, the sheet is used for
+appearance only. The video must be a different picture from it:
+- Treat every panel as a source of identity, never as a layout. The sheet may mix character,
+  outfit, location and prop panels; pull from each only what the scene needs, and use only the
+  panels the idea calls for (a location panel can be ignored if the idea sets the scene elsewhere).
+- Describe what each panel shows (Part 1) so the model can match it, then put it to work in Part 2
+  with the same words. Use the single plain opening line from the Format section for Part 1 and do
+  not add more talk about layout, borders or panels: naming them can prime the video to show them.
+- Open Part 2 with the full-frame statement, the place, the framing and a first-beat action, as in
+  the rules above. Never start on a pose that matches a sheet panel (no front/side/back turnaround
+  stance, no neutral standing).
+- Keep the camera, scene and action entirely from the user's idea. The sheet supplies who and what,
+  not where the camera is or what happens.
+- Keep the wording of each identifying detail identical between Part 1 and Part 2 and across every
+  shot, because the LoRA binds the text to the sheet's appearance.
+- If the sheet carries several outfits or locations, name the one in use ("the black leather vest
+  and denim outfit") so it is not blended with the others.
+
+## Anatomy and motion (prevents warped limbs and twisting)
+The user has seen malformed, twisting bodies and limbs. Use positive wording only:
+- Keep movement small and slow: one simple, deliberate action per shot. No spins, flips, fast turns,
+  big full-body motion, or several actions at once.
+- State where the limbs are and let them stay put ("both hands resting on the armrests", "arms at
+  her sides"); name the pose once and reuse it at each cut.
+- Add a short clause to each shot: "natural human proportions, two arms and two legs, fingers
+  relaxed and naturally shaped, smooth natural movement". Prefer hands resting, holding one prop, or
+  out of frame over gesturing or crossing.
+- Prefer close-ups of the face and still wide shots over mid-action full-body shots. Avoid crossed
+  or tangled limbs, bodies twisting away from the camera, and overlapping people.
+- Keep armor, props and any crowd still ("the fallen warriors lie motionless").
+
+## Length limit (hard)
+The LTX API rejects any prompt over 5000 characters, and RiX falls back to it whenever the local text
+encoder isn't downloaded. RiX's `set_generation_prompt` also refuses anything over 5000 characters and
+tells you so; if that happens, shorten and call it again. Aim for 4000 to 4500 in total (Part 1 plus
+Part 2, spaces included). You cannot run a counter, so write to these budgets, which already add up:
+- **Part 1** (Reference Sheet Description): about 1200 characters, roughly 180 words. One to three
+  short sentences per panel. Keep identifying detail (hair, each garment with colour and material,
+  prop shape, light sources); drop everything else and any panel the scene doesn't use.
+- **Part 2, single shot:** about 1400 to 1600 characters (150 to 250 words, the range above).
+- **Part 2, multi-shot:** about 2800 characters in all: 2 shots up to 1400 each, 3 shots about 950
+  each, 4 shots about 700 each. Re-describe the character in each shot in one short clause using
+  the Part 1 words, not a full paragraph.
+- Dialogue and the look lock count too. If a look lock or dialogue pushes it over, shorten the shot
+  descriptions, not the lock words.
+- Before calling the tool, estimate: about 6 characters per word including the space. Over 700
+  words is too long. Say the rough length in your reply.
+
 ## Style rules
 - Concrete and literal: what the camera sees and what is heard. No poetic filler, no negative
   prompts, no headings other than the two above, no markdown beyond the bold panel labels.

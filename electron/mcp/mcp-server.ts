@@ -30,6 +30,8 @@ import { analyzeAudio, probeMedia, sampleFrames, type Frame } from './media-tool
  */
 
 const DEFAULT_PORT = 47821
+// The LTX API's prompt limit; set_generation_prompt refuses anything longer.
+const PROMPT_CHAR_LIMIT = 5000
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05']
 
 type ToolContent = Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>
@@ -103,8 +105,8 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'set_generation_prompt',
-    description: 'Put a finished video-generation prompt into the prompt box on RiX\'s Generate screen, ready for the user to review and generate. '
-      + 'Used by the rix-prompt skill ("Prompt with Claude"). Replaces the box\'s text (the user can undo it). Does not start a generation.',
+    description: 'Put a finished generation prompt (a video prompt, or a reference-sheet image prompt) into the prompt box on RiX\'s Generate screen, ready for the user to review and generate. '
+      + 'Used by the rix-prompt and rix-sheet-maker skills ("Prompt with Claude"). Replaces the box\'s text (the user can undo it). Does not start a generation.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -118,6 +120,11 @@ const TOOLS: Tool[] = [
     run: async (args) => {
       const prompt = str(args.prompt)
       if (!prompt?.trim()) throw new Error('"prompt" is required')
+      // The LTX API rejects prompts over 5000 characters (and RiX falls back to it when the local
+      // text encoder isn't downloaded), so refuse here and let Claude shorten and call again.
+      if (prompt.length > PROMPT_CHAR_LIMIT) {
+        throw new Error(`The prompt is ${prompt.length} characters. The limit is 5000 (aim for under 4500). Shorten it, keeping every shot, then call set_generation_prompt again. Shorten the reference description first, then trim each shot's re-description.`)
+      }
       const result = await callEditor('set_generation_prompt', { prompt, image_path: str(args.image_path), folder: str(args.folder), thumbnail_only: args.thumbnail_only === true }, 10000)
       // Bring RiX forward so the user sees the prompt land in the box.
       const win = getMainWindow()
