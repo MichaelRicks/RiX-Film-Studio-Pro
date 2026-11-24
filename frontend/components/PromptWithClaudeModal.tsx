@@ -11,10 +11,10 @@ import { pathToFileUrl } from '../lib/file-url'
  * set_generation_prompt. The user presses Send in Claude, then comes back to review it.
  */
 
-// 1 = a single continuous shot (reference sheets only; rix-prompt-sheet has a single-shot mode)
+// 1 = a single continuous shot (reference sheets only; rix-ingredients-prompt has a single-shot mode)
 type ShotCount = 1 | 2 | 3 | 4
 // 'first-frame': the image is the opening frame. 'sheet': a character/prop/location reference
-// sheet used only as an ingredient (rix-prompt-sheet skill), never shown or animated.
+// sheet used only as an ingredient (rix-ingredients-prompt skill), never shown or animated.
 type ImageKind = 'first-frame' | 'sheet'
 
 // Visual look, handled by the rix-lens skill. 'natural' adds nothing (plain rix-prompt wording);
@@ -75,7 +75,7 @@ function lookLines(brief: PromptBrief, sheet: boolean): string[] {
 function buildReviseBrief(brief: PromptBrief): string {
   const sheet = brief.imageKind === 'sheet' && !!brief.imagePath
   return [
-    'Revise the existing RiX video prompt below. Follow the rix-prompt skill\'s recipe (or rix-prompt-sheet\'s two-part format if the prompt below is in that format). Change ONLY what I ask for. Keep every other word, shot, line of dialogue and detail exactly as written, and keep the shot count unless I ask otherwise. Then put the COMPLETE revised prompt in RiX\'s prompt box with set_generation_prompt.',
+    'Revise the existing RiX video prompt below. Follow the rix-prompt skill\'s recipe (or rix-ingredients-prompt\'s two-part format if the prompt below is in that format). Change ONLY what I ask for. Keep every other word, shot, line of dialogue and detail exactly as written, and keep the shot count unless I ask otherwise. Then put the COMPLETE revised prompt in RiX\'s prompt box with set_generation_prompt.',
     '',
     'Current prompt:',
     brief.existingPrompt.trim(),
@@ -97,7 +97,7 @@ export function buildPromptBrief(brief: PromptBrief): string {
   const sheet = brief.imageKind === 'sheet' && !!brief.imagePath
   const lines = [
     sheet
-      ? 'Write a multi-shot video prompt for RiX with the rix-prompt-sheet skill, then put it in RiX\'s prompt box with set_generation_prompt.'
+      ? 'Write a multi-shot video prompt for RiX with the rix-ingredients-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.'
       : 'Write a multi-shot video prompt for RiX with the rix-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.',
     '',
     brief.imagePath
@@ -110,7 +110,7 @@ It is attached to the Ingredients IC-LoRA as an appearance reference ONLY. Follo
       : 'Reference image: none. Write the prompt from the idea alone.',
     `Idea: ${brief.idea.trim() || (sheet ? '(none given: invent a fitting location and a simple scene for this character)' : '(none given: pick a simple, fitting scene from the image)')}`,
     brief.shots === 1
-      ? 'Shots: 1. Use the SINGLE-shot mode of rix-prompt-sheet: one continuous shot, one camera, no cuts.'
+      ? 'Shots: 1. Use the SINGLE-shot mode of rix-ingredients-prompt: one continuous shot, one camera, no cuts.'
       : `Shots: ${brief.shots}`,
     brief.dialogue
       ? 'Dialogue: include a few short spoken lines if they suit the scene.'

@@ -106,7 +106,7 @@ const TOOLS: Tool[] = [
   {
     name: 'set_generation_prompt',
     description: 'Put a finished generation prompt (a video prompt, or a reference-sheet image prompt) into the prompt box on RiX\'s Generate screen, ready for the user to review and generate. '
-      + 'Used by the rix-prompt and rix-sheet-maker skills ("Prompt with Claude"). Replaces the box\'s text (the user can undo it). Does not start a generation.',
+      + 'Used by the rix-prompt and rix-ingredients-sheet skills ("Prompt with Claude"). Replaces the box\'s text (the user can undo it). Does not start a generation.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -3,6 +3,11 @@ import { createPortal } from 'react-dom'
 import { ExternalLink, Loader2, Sparkles, X } from 'lucide-react'
 import { pathToFileUrl } from '../lib/file-url'
 import { useClaudeRun } from '../hooks/use-claude-run'
+import { LibraryImagePicker } from './LibraryImagePicker'
+import { CropImageDialog } from './CropImageDialog'
+import { FILE_DND, type LibFile } from './gpm/DownloadsBrowser'
+import { GPM_IMAGE_DND_TYPE, saveDataUrlToTempFile, type GpmDndImage } from './gpm/gpm-image-file'
+import { imagePathsFromDataTransfer } from '../lib/keyframe-drop'
 
 /**
  * "Prompt with Claude" in Image mode: asks the questions the rix-sheet-maker skill needs
@@ -26,11 +31,39 @@ export interface SheetBrief {
   propsText: string
   style: Style
   aspect: Aspect
-  // A picture of the character to copy (face, hair, build). Claude describes it exactly.
-  matchImagePath: string | null
-  // With a reference image: keep what they wear in it, or use the outfit described below.
+  // Existing images Claude should read and fold into the sheet (character, outfit, place, prop,
+  // or a finished sheet to convert). Several allowed.
+  refs: RefImage[]
+  // With a character image: keep what they wear in it, or use the outfit described below.
   keepOutfit: boolean
 }
+
+export type RefRole = 'character' | 'outfit' | 'location' | 'prop' | 'sheet' | 'turnaround' | 'face'
+export interface RefImage { path: string; role: RefRole }
+
+/** The bottom-row tiles of the built layout, left to right: outfits, then props, then the location. */
+export function bottomTiles(refs: RefImage[]): RefImage[] {
+  return (['outfit', 'prop', 'location'] as RefRole[]).flatMap(role => refs.filter(r => r.role === role))
+}
+
+// What the user last had in the window, so closing it to clean a background doesn't lose the images.
+let rememberedRefs: RefImage[] = []
+
+const CLEANUP_PROMPTS: Partial<Record<RefRole, string>> = {
+  prop: 'Isolate the object on a plain, seamless light-grey studio backdrop with soft even light and a faint contact shadow. Keep the object exactly as it is: the same shape, colour, material, wear and scale. Remove everything else in the picture.',
+  outfit: 'Show ONE garment only, the front view of the main outfit, as an invisible-mannequin product shot on a plain, seamless light-grey studio backdrop with soft even light. Remove the head, neck, face, hair, arms, hands and legs completely: no person and no face anywhere, only the empty garment (and its shoes if shown) holding its shape. Discard every other view, every smaller picture and any accessories or props. Keep the garment exactly as it is: the same cut, colour, material, pattern and trim.',
+  character: 'Place this same person on a plain, seamless light-grey studio backdrop with soft even light. Keep the face, hair, skin, clothes and pose exactly as they are. Remove everything else in the picture.',
+}
+
+const ROLES: { id: RefRole; label: string; text: string }[] = [
+  { id: 'character', label: 'Character', text: 'a character: copy this exact likeness (face, hair, skin, build)' },
+  { id: 'outfit', label: 'Outfit', text: 'an outfit or garment: describe it exactly' },
+  { id: 'location', label: 'Location', text: 'a location: describe the place and its light exactly' },
+  { id: 'prop', label: 'Prop', text: 'a prop: describe its shape, material, colour and wear exactly' },
+  { id: 'face', label: 'Face close-up', text: 'a finished face close-up of the character: copy this face exactly' },
+  { id: 'turnaround', label: 'Turnaround', text: 'a finished turnaround of the character: copy the face, hair and outfit exactly' },
+  { id: 'sheet', label: 'Existing sheet', text: 'an existing reference sheet to convert: read every panel, keep its character and items, and rebuild it in the Ingredients layout' },
+]
 
 const STYLES: { id: Style; label: string; text: string }[] = [
   { id: 'photoreal', label: 'Photoreal', text: 'photoreal live action' },
@@ -55,23 +88,35 @@ export function buildSheetBrief(b: SheetBrief): string {
     ...(b.location ? [`Location: ${b.locationText.trim() || none}`] : []),
     ...(b.props ? [`Props: ${b.propsText.trim() || none}`] : []),
     `Style: ${STYLES.find(s => s.id === b.style)?.text}.`,
-    `Aspect ratio: ${b.aspect}.`,
-    ...(b.matchImagePath
+    `Aspect ratio: ${b.aspect}. This is mandatory: state it as the canvas size in the first sentence of the prompt and again in the last, and make the prompt a NEW image of that shape, never an edit that keeps the shape of any attached image. Every panel, including the face close-up, is its own separate, crisp, fully opaque tile.`,
+    ...(b.refs.length > 0
       ? [
-          `Character reference image: ${b.matchImagePath}`,
-          'Look at it with inspect_media (width 1280 or more) and follow the "Character from a reference image" section of the skill. This is a real likeness to copy: describe the face, hair, skin, age, build and every visible detail exactly as the image shows them. Do not invent or "improve" features. The text I wrote under the character is only changes or extras to that person.',
-          b.keepOutfit
-            ? 'Outfit: keep what they wear in the image.'
-            : 'Outfit: do not use the outfit in the image; use the outfit I described.',
-          'Start the sheet prompt by telling the image model to use the attached reference image as the exact likeness of the person in every panel.',
+          `I attached ${b.refs.length} existing image${b.refs.length === 1 ? '' : 's'}. Look at EACH with inspect_media (frames 1, width 1280 or more, one call per image) and follow the "Character from a reference image" and "Converting an existing sheet or several images" sections of the skill. Describe exactly what each shows; do not invent or "improve" anything. The text I wrote above is only changes or extras to what the images show.`,
+          ...b.refs.map((r, i) => `Image ${i + 1}: ${r.path}\n  Role: ${ROLES.find(x => x.id === r.role)?.text}.`),
+          ...(b.refs.some(r => r.role === 'outfit')
+            ? ['Outfit: an Outfit image is attached, so the character WEARS that outfit in every full-body view of the turnaround (and its neckline or collar in the face close-up). It also gets its own garment panel, shown whole, front and back, never cropped. Ignore what the character wears in their own image, but keep their hair, headwear-free face and any accessories I did not replace.']
+            : []),
+          ...(b.refs.some(r => r.role === 'character') && !b.refs.some(r => r.role === 'outfit')
+            ? [
+                b.keepOutfit
+                  ? 'Outfit: keep what the character wears in their image.'
+                  : 'Outfit: do not use the outfit in the character image; use the outfit I described.',
+                'Start the sheet prompt by telling the image model to use the attached reference image as the exact likeness of the person in every panel.',
+              ]
+            : []),
+          'Tell me which of these images to attach in my image tool for the sheet.',
         ]
-      : ['No character reference image.']),
+      : ['No existing images.']),
     '',
     'Reply in a few lines: the layout you chose, anything you invented, and how many versions to generate before picking one. Remind me to test the finished sheet with one short Ingredients video.',
   ].join('\n')
 }
 
-export function SheetMakerModal({ inputImage = null, onClose }: {
+export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onClose }: {
+  /** Loads an image as the Image input and fills the prompt box (for the clean-background helper). */
+  onCleanup?: (path: string, prompt: string) => void
+  /** Sets the Image-mode input image (used for the 16:9 canvas helper). */
+  onUseCanvas?: (path: string) => void
   /** The Image-mode input image, if one is loaded: offered as the character reference. */
   inputImage?: string | null
   onClose: () => void
@@ -79,16 +124,20 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
   const c = useClaudeRun()
   const [opening, setOpening] = useState(false)
   const [followUp, setFollowUp] = useState('')
+  const [dragOver, setDragOver] = useState(false)
+  const [libOpen, setLibOpen] = useState(false)
+  const [cropIndex, setCropIndex] = useState<number | null>(null)
   const [brief, setBrief] = useState<SheetBrief>({
     character: true, characterCount: 1, characterText: '',
     outfits: false, outfitsText: '',
     location: false, locationText: '',
     props: false, propsText: '',
-    style: 'photoreal', aspect: '16:9', matchImagePath: inputImage, keepOutfit: true,
+    style: 'photoreal', aspect: '16:9', refs: rememberedRefs.length ? rememberedRefs : inputImage ? [{ path: inputImage, role: 'character' }] : [], keepOutfit: true,
   })
   const set = <K extends keyof SheetBrief>(k: K, v: SheetBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
 
-  const hasContent = brief.character || brief.location || brief.props
+  rememberedRefs = brief.refs
+  const hasContent = brief.character || brief.location || brief.props || brief.refs.length > 0
   const needsCharacterForOutfits = brief.outfits && !brief.character
   const valid = hasContent && !needsCharacterForOutfits
   const prompt = buildSheetBrief(brief)
@@ -110,13 +159,173 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
       onClose()
     } finally { setOpening(false) }
   }
-  const browseMatch = async () => {
+  const addRefs = async () => {
     const paths = await window.electronAPI.showOpenFileDialog({
-      title: 'Select a character reference image',
+      title: 'Select reference images',
       filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      properties: ['openFile', 'multiSelections'],
     })
-    if (paths && paths.length > 0) set('matchImagePath', paths[0])
+    if (paths) addPaths(paths)
   }
+  const addPaths = (paths: string[]) => {
+    if (paths.length === 0) return
+    setBrief(b => {
+      const have = new Set(b.refs.map(r => r.path))
+      let hasChar = b.refs.some(r => r.role === 'character')
+      const fresh: RefImage[] = []
+      for (const p of paths) {
+        if (have.has(p)) continue
+        have.add(p)
+        fresh.push({ path: p, role: hasChar ? 'prop' : 'character' })
+        hasChar = true
+      }
+      return { ...b, refs: [...b.refs, ...fresh].slice(0, 8) }
+    })
+  }
+  // Drop: library files, Prompt Manager images, project assets, or files from the desktop.
+  const onDropRefs = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const dt = e.dataTransfer
+    const gpm = dt.getData(GPM_IMAGE_DND_TYPE)
+    if (gpm) {
+      try {
+        const { name, dataUrl } = JSON.parse(gpm) as GpmDndImage
+        void saveDataUrlToTempFile(dataUrl, name).then(p => addPaths([p])).catch(() => {})
+      } catch { /* ignore a malformed drag */ }
+      return
+    }
+    const lib = dt.getData(FILE_DND)
+    if (lib) {
+      try {
+        const f = JSON.parse(lib) as LibFile
+        if (!f.isVideo && !f.isAudio) addPaths([f.path])
+      } catch { /* ignore */ }
+      return
+    }
+    addPaths(imagePathsFromDataTransfer(dt))
+  }
+  // Image-mode edits keep the input's shape, so a 16:9 sheet needs a 16:9 input: put the character
+  // photo as the top-left tile on a grey 1920x1080 canvas. The model still generates the whole
+  // sheet (the photo is a likeness reference, not kept as a tile).
+  const [canvasBusy, setCanvasBusy] = useState(false)
+  const [finalMsg, setFinalMsg] = useState<string | null>(null)
+  const [finalPath, setFinalPath] = useState<string | null>(null)
+  const [libFolders, setLibFolders] = useState<string[]>([])
+  const [saveFolder, setSaveFolder] = useState('Reference Sheets')
+  // Read through the main process as a data URL: a canvas that has drawn file:// pictures is
+  // tainted in the packaged app and can't be exported.
+  const loadImg = async (src: string) => {
+    let url = pathToFileUrl(src)
+    try {
+      const r = await window.electronAPI.gpmLibReadAsDataUrl({ path: src })
+      if (r.success) url = r.dataUrl
+    } catch { /* fall back to the file URL */ }
+    return new Promise<HTMLImageElement>((res, rej) => {
+      const im = new Image()
+      im.onload = () => res(im)
+      im.onerror = () => rej(new Error(`Could not open ${src.split(/[\/]/).pop()}`))
+      im.src = url
+    })
+  }
+  const makeCanvas = async () => {
+    const src = (brief.refs.find(r => r.role === 'character') ?? brief.refs[0])?.path
+    if (!src || !onUseCanvas) return
+    setCanvasBusy(true)
+    setFinalMsg(null)
+    try {
+      const img = await loadImg(src)
+      const W = 1920, H = 1080
+      const cv = document.createElement('canvas')
+      cv.width = W; cv.height = H
+      const g = cv.getContext('2d')
+      if (!g) return
+      g.fillStyle = '#2a2a2a'
+      g.fillRect(0, 0, W, H)
+      const tile = { x: W * 0.01, y: H * 0.02, w: W * 0.27, h: H * 0.5 }
+      g.fillStyle = '#8a8a8a'
+      g.fillRect(tile.x, tile.y, W * 0.98 - tile.x, H * 0.96)
+      const k = Math.min(tile.w / img.naturalWidth, tile.h / img.naturalHeight)
+      g.drawImage(img, tile.x, tile.y, img.naturalWidth * k, img.naturalHeight * k)
+      onUseCanvas(await saveDataUrlToTempFile(cv.toDataURL('image/png'), 'character-16x9-canvas.png'))
+    } catch (e) {
+      c.setError(`Could not build the 16:9 canvas: ${e instanceof Error ? e.message : String(e)}`)
+    } finally { setCanvasBusy(false) }
+  }
+
+  // "Assemble my images": no AI. Tiles the finished pictures exactly as they are into one 16:9 sheet
+  // (top row: face close-up or character photo, then a finished turnaround; bottom row: outfits,
+  // props, location), each row sized so the pictures keep their shape, then files it in the library.
+  const saveFinal = async () => {
+    if (!finalPath) return
+    const api = window.electronAPI
+    const folder = saveFolder.trim() || 'Reference Sheets'
+    try {
+      if (!libFolders.some(f => f.toLowerCase() === folder.toLowerCase())) {
+        const cr = await api.gpmLibCreateFolder({ name: folder })
+        if (!cr.success) { setFinalMsg(`Could not save: ${cr.error}`); return }
+      }
+      const target = libFolders.find(f => f.toLowerCase() === folder.toLowerCase()) ?? folder
+      const r = await api.gpmLibAddFiles({ folder: target, srcPaths: [finalPath], baseName: 'ingredients sheet' })
+      if (!r.success) { setFinalMsg(`Could not save: ${r.error}`); return }
+      if (!r.added) { setFinalMsg('Could not save: the library did not accept the file.'); return }
+      const root = (await api.gpmLibGetRoot()).root
+      setFinalMsg(`Saved to the library folder "${target}" (${root}). Use it as the Ingredients input.`)
+    } catch (e) {
+      setFinalMsg(`Could not save: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  const assemble = async () => {
+    setFinalPath(null)
+    const top: RefImage[] = [
+      ...(brief.refs.filter(r => r.role === 'face').slice(0, 1).length ? brief.refs.filter(r => r.role === 'face').slice(0, 1) : brief.refs.filter(r => r.role === 'character').slice(0, 1)),
+      ...brief.refs.filter(r => r.role === 'turnaround'),
+    ]
+    const rows = [top, bottomTiles(brief.refs)].filter(r => r.length > 0)
+    if (rows.length === 0) return
+    setCanvasBusy(true)
+    setFinalMsg(null)
+    try {
+      const W = 1920, H = 1080, gap = 12
+      const loaded = await Promise.all(rows.map(r => Promise.all(r.map(x => loadImg(x.path)))))
+      const heights = loaded.map(row => (W - gap * (row.length - 1)) / row.reduce((a, im) => a + im.naturalWidth / im.naturalHeight, 0))
+      const total = heights.reduce((a, h) => a + h, 0) + gap * (rows.length - 1)
+      const k = Math.min(1, H / total)
+      const cv = document.createElement('canvas')
+      cv.width = W; cv.height = H
+      const g = cv.getContext('2d')
+      if (!g) return
+      g.fillStyle = '#1c1c1c'
+      g.fillRect(0, 0, W, H)
+      let y = (H - total * k) / 2
+      loaded.forEach((row, ri) => {
+        const h = heights[ri] * k
+        const rowW = row.reduce((a, im) => a + h * im.naturalWidth / im.naturalHeight, 0) + gap * (row.length - 1)
+        let x = (W - rowW) / 2
+        for (const im of row) {
+          const w = h * im.naturalWidth / im.naturalHeight
+          g.drawImage(im, x, y, w, h)
+          x += w + gap
+        }
+        y += h + gap * k
+      })
+      const p = await saveDataUrlToTempFile(cv.toDataURL('image/png'), 'ingredients-sheet-assembled-16x9.png')
+      setFinalPath(p)
+      // Offer the library folders; default to a sheet-like one, else a new "Reference Sheets".
+      try {
+        const d = await window.electronAPI.gpmLibList()
+        setLibFolders(d.folders)
+        const same = d.folders.find(f => f.toLowerCase() === 'reference sheets') ?? d.folders.find(f => /sheet/i.test(f))
+        setSaveFolder(same ?? 'Reference Sheets')
+      } catch { setLibFolders([]); setSaveFolder('Reference Sheets') }
+      setFinalMsg('Built. Pick a library folder and save it, or drag it from the preview.')
+    } catch (e) {
+      setFinalMsg(`Could not assemble those images: ${e instanceof Error ? e.message : String(e)}`)
+    } finally { setCanvasBusy(false) }
+  }
+  const setRole = (i: number, role: RefRole) => setBrief(b => ({ ...b, refs: b.refs.map((r, j) => j === i ? { ...r, role } : r) }))
+  const removeRef = (i: number) => setBrief(b => ({ ...b, refs: b.refs.filter((_, j) => j !== i) }))
+  const hasCharacterRef = brief.refs.some(r => r.role === 'character')
 
   const fieldCls = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500'
   const labelCls = 'block text-xs font-medium text-zinc-400 mb-1.5'
@@ -132,6 +341,7 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
     </button>
   )
 
+  const cropping = cropIndex !== null ? brief.refs[cropIndex] : null
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={close}>
       <div className="bg-zinc-900 rounded-2xl border border-zinc-700/50 shadow-2xl w-full max-w-lg relative overflow-hidden max-h-[calc(100dvh-2rem)] flex flex-col"
@@ -139,7 +349,7 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div className="flex items-center gap-2.5">
             <Sparkles className="h-5 w-5 text-[rgb(var(--accent))]" />
-            <h2 className="text-lg font-bold text-white">Make a reference sheet</h2>
+            <h2 className="text-lg font-bold text-white">Make an Ingredients sheet</h2>
           </div>
           <button onClick={close} className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors">
             <X className="h-5 w-5" />
@@ -207,7 +417,7 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
           {!run && (<>
             <p className="text-xs text-zinc-400 leading-relaxed">
               Claude writes the image prompt for a reference sheet and puts it in the prompt box. Generate it here in Image mode,
-              then use the result as the Ingredients input in IC-LoRA.{brief.matchImagePath ? ' With a character image, load that same image as the Image-mode input too, so the image model can see the person.' : ''}
+              then use the result as the Ingredients input in IC-LoRA.{brief.refs.length > 0 ? ' Note: in RiX Image mode an input image is edited, so the result keeps that image\'s shape. For a 16:9 sheet use the button below, or generate with no input image.' : ''}
             </p>
 
             <div>
@@ -218,53 +428,100 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
                 <Toggle k="location" label="Location" hint="An empty wide plate of the place" />
                 <Toggle k="props" label="Props" hint="Key objects, shown on their own" />
               </div>
-              {!hasContent && <p className="mt-1.5 text-[11px] text-amber-300/80">Pick at least a character, a location or props.</p>}
+              {!hasContent && <p className="mt-1.5 text-[11px] text-amber-300/80">Pick at least a character, a location or props, or add an image.</p>}
               {needsCharacterForOutfits && <p className="mt-1.5 text-[11px] text-amber-300/80">Outfits need a character. Turn Character on.</p>}
+            </div>
+
+            <div className={`rounded-xl border px-3 py-3 space-y-2.5 transition-colors ${dragOver ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.08)]' : 'border-zinc-800 bg-zinc-950/50'}`}
+              onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true) }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
+              onDrop={onDropRefs}>
+              <div className="text-xs font-medium text-zinc-300">Images you already have (optional)</div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                Drop images here, add them, or pick them from your library: a character, an outfit, a location, a prop, or a finished sheet to convert. Claude reads each one, describes it exactly and builds the Ingredients sheet from them.
+              </p>
+              {brief.refs.map((r, i) => (
+                <div key={r.path} className="flex items-center gap-2.5">
+                  <img src={pathToFileUrl(r.path)} alt="" className="h-12 w-12 object-cover rounded-lg border border-zinc-700 flex-shrink-0" />
+                  <select value={r.role} onChange={(e) => setRole(i, e.target.value as RefRole)}
+                    className="bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500">
+                    {ROLES.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+                  </select>
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500" title={r.path}>{r.path.split(/[\\/]/).pop()}</span>
+                  <button type="button" title="Keep only part of this picture (exact pixels, no AI)"
+                    onClick={() => setCropIndex(i)}
+                    className="px-2 py-1 text-[11px] text-zinc-400 hover:text-white underline underline-offset-2">Crop</button>
+                  {onCleanup && CLEANUP_PROMPTS[r.role] && (
+                    <button type="button" title="Closes this window, loads the image as the Image input and fills the prompt box. Generate, then add the result back here."
+                      onClick={() => { onCleanup(r.path, CLEANUP_PROMPTS[r.role] as string); onClose() }}
+                      className="px-2 py-1 text-[11px] text-zinc-400 hover:text-white underline underline-offset-2">Clean background</button>
+                  )}
+                  <button type="button" onClick={() => removeRef(i)} className="px-2 py-1 text-xs text-zinc-500 hover:text-white">Remove</button>
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void addRefs()} disabled={brief.refs.length >= 8}
+                  className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 text-xs text-zinc-300 transition-colors">
+                  Add images
+                </button>
+                <button type="button" onClick={() => setLibOpen(o => !o)} disabled={brief.refs.length >= 8}
+                  className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 text-xs text-zinc-300 transition-colors">
+                  From library
+                </button>
+                {inputImage && !brief.refs.some(r => r.path === inputImage) && (
+                  <button type="button" onClick={() => setBrief(bb => ({ ...bb, refs: [...bb.refs, { path: inputImage, role: 'character' }] }))}
+                    className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 text-xs text-zinc-300 transition-colors">
+                    Use the input image
+                  </button>
+                )}
+              </div>
+              {brief.refs.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {onUseCanvas && (
+                    <button type="button" onClick={() => void makeCanvas()} disabled={canvasBusy}
+                      title="Image mode edits keep the input image's shape. This puts the character on a 16:9 canvas and loads it as the Image input, so the sheet comes out 16:9."
+                      className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 text-xs text-zinc-300 transition-colors">
+                      {canvasBusy ? 'Working…' : 'Put the character on a 16:9 canvas → Image input'}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => void assemble()} disabled={canvasBusy}
+                    title="No AI: tiles your finished pictures exactly as they are into one 16:9 sheet and saves it to the library. Add a face close-up and a turnaround (roles below) for the character row."
+                    className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-40 text-xs text-zinc-300 transition-colors">
+                    Assemble my images into a sheet (no AI)
+                  </button>
+                </div>
+              )}
+              {finalMsg && <p className={`text-[11px] ${finalMsg.startsWith('Could not') ? 'text-red-400' : 'text-emerald-300'}`}>{finalMsg}</p>}
+              {finalPath && <img src={pathToFileUrl(finalPath)} alt="" className="w-full rounded-lg border border-zinc-700" />}
+              {finalPath && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-zinc-400">Save to folder</span>
+                  <input list="sheet-save-folders" value={saveFolder} onChange={(e) => setSaveFolder(e.target.value)}
+                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500" />
+                  <datalist id="sheet-save-folders">{libFolders.map(f => <option key={f} value={f} />)}</datalist>
+                  <button type="button" onClick={() => void saveFinal()}
+                    className="px-3 py-1.5 rounded-lg bg-[rgb(var(--accent))] hover:brightness-110 text-white text-xs font-semibold transition">Save</button>
+                </div>
+              )}
+              {libOpen && (
+                <LibraryImagePicker selected={brief.refs.map(r => r.path)}
+                  onPick={(p) => addPaths([p])} onClose={() => setLibOpen(false)} />
+              )}
+              {hasCharacterRef && !brief.refs.some(r => r.role === 'outfit') && (
+                <div className="flex gap-1.5">
+                  {([[true, 'Keep their outfit'], [false, 'Use my outfit text']] as [boolean, string][]).map(([v, label]) => (
+                    <button key={label} type="button" onClick={() => set('keepOutfit', v)} className={pill(brief.keepOutfit === v)}>{label}</button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {brief.character && (
               <div className="space-y-3">
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 px-3 py-3 flex items-start gap-3">
-                  {brief.matchImagePath ? (
-                    <img src={pathToFileUrl(brief.matchImagePath)} alt="" className="h-24 w-20 object-cover rounded-lg border border-zinc-700 flex-shrink-0" />
-                  ) : (
-                    <div className="h-24 w-20 rounded-lg border border-dashed border-zinc-700 flex items-center justify-center text-[11px] text-zinc-500 text-center px-1 flex-shrink-0">No image</div>
-                  )}
-                  <div className="min-w-0 space-y-2">
-                    <div className="text-xs font-medium text-zinc-300">Character reference image (optional)</div>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      Have a picture of the person? Claude copies their face, hair and build exactly instead of inventing them.
-                      {inputImage && brief.matchImagePath !== inputImage ? ' Your Image-mode input image is available too.' : ''}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => void browseMatch()}
-                        className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 text-xs text-zinc-300 transition-colors">
-                        {brief.matchImagePath ? 'Change image' : 'Choose image'}
-                      </button>
-                      {inputImage && brief.matchImagePath !== inputImage && (
-                        <button type="button" onClick={() => set('matchImagePath', inputImage)}
-                          className="px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 text-xs text-zinc-300 transition-colors">
-                          Use the input image
-                        </button>
-                      )}
-                      {brief.matchImagePath && (
-                        <button type="button" onClick={() => set('matchImagePath', null)} className="px-2 py-1.5 text-xs text-zinc-500 hover:text-white">Remove</button>
-                      )}
-                    </div>
-                    {brief.matchImagePath && (
-                      <div className="flex gap-1.5">
-                        {([[true, 'Keep their outfit'], [false, 'Use my outfit text']] as [boolean, string][]).map(([v, label]) => (
-                          <button key={label} type="button" onClick={() => set('keepOutfit', v)} className={pill(brief.keepOutfit === v)}>{label}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-medium text-zinc-400">
-                      {brief.matchImagePath ? 'Anything to change or add?' : 'Who is the character?'}
+                      {hasCharacterRef ? 'Anything to change or add?' : 'Who is the character?'}
                     </label>
                     <div className="flex gap-1.5">
                       {([1, 2] as const).map(n => (
@@ -275,7 +532,7 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
                     </div>
                   </div>
                   <textarea value={brief.characterText} onChange={(e) => set('characterText', e.target.value)} rows={3}
-                    placeholder={brief.matchImagePath
+                    placeholder={hasCharacterRef
                       ? 'Optional. A name, or what to change: e.g. "Rosa. Dusty black duster coat instead of the jacket"'
                       : 'Name, age, build, a distinctive face, what they wear. e.g. Rosa, 34, lean, weathered face with a scar through one eyebrow, black leather vest and boots'}
                     className={`${fieldCls} resize-none`} />
@@ -407,6 +664,10 @@ export function SheetMakerModal({ inputImage = null, onClose }: {
           )}
         </div>
       </div>
+      {cropping && cropIndex !== null && (
+        <CropImageDialog path={cropping.path} onClose={() => setCropIndex(null)}
+          onDone={(np) => { setBrief(b => ({ ...b, refs: b.refs.map((r, j) => j === cropIndex ? { ...r, path: np } : r) })); setCropIndex(null) }} />
+      )}
     </div>,
     document.body,
   )

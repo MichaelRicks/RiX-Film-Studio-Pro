@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Upload, Loader2, Film, Sparkles, Image as ImageIcon,
-  RefreshCw, Download, AlertCircle, Trash2, Square,
+  RefreshCw, Download, AlertCircle, Trash2, Square, Clock,
 } from 'lucide-react'
 import { ApiClient, type ApiRequestBodyOf, type ApiSuccessOf } from '../lib/api-client'
 import { logger } from '../lib/logger'
@@ -9,6 +9,13 @@ import { pathToFileUrl } from '../lib/file-url'
 import { OutpaintCanvasEditor, type OutpaintPads } from './OutpaintCanvasEditor'
 import { saveDataUrlToTempFile, GPM_IMAGE_DND_TYPE, type GpmDndImage } from './gpm/gpm-image-file'
 import { FILE_DND, type LibFile } from './gpm/DownloadsBrowser'
+
+function formatClock(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000))
+  const m = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${m}:${sec.toString().padStart(2, '0')}`
+}
 
 export type ICLoraConditioningType = 'canny' | 'depth' | 'custom'
 
@@ -43,6 +50,8 @@ interface ICLoraPanelProps {
   conditioningStrength?: number
   onConditioningStrengthChange?: (strength: number) => void
   outputVideoPath?: string | null
+  // Render stopwatch (ms): ticks while processing, then holds the final time next to the output.
+  elapsedMs?: number
   onChange?: (data: {
     videoPath: string | null
     conditioningType: ICLoraConditioningType
@@ -86,6 +95,7 @@ export function ICLoraPanel({
   conditioningStrength: conditioningStrengthProp,
   onConditioningStrengthChange,
   outputVideoPath: _outputVideoPath,
+  elapsedMs = 0,
   onChange,
 }: ICLoraPanelProps) {
   const inputVideoRef = useRef<HTMLVideoElement>(null)
@@ -774,6 +784,13 @@ export function ICLoraPanel({
           <div className="flex-1 flex flex-col border-l border-zinc-800 min-w-0">
             <div className="px-3 py-2 border-b border-zinc-800 flex items-center">
               <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Output</span>
+              {(isProcessing || (_outputVideoPath && elapsedMs > 0)) && (
+                <span className="ml-auto flex items-center gap-1 text-[11px] font-mono tabular-nums text-zinc-400"
+                  title={isProcessing ? 'Time since this generation started' : 'Render time'}>
+                  <Clock className="h-3 w-3" />
+                  {formatClock(elapsedMs)}
+                </span>
+              )}
             </div>
             <div className="flex-1 bg-black flex items-center justify-center min-h-0 relative">
               {_outputVideoPath ? (
@@ -786,6 +803,10 @@ export function ICLoraPanel({
                 <div className="text-center p-4">
                   <Loader2 className="h-6 w-6 text-blue-400 animate-spin mx-auto mb-2" />
                   <p className="text-zinc-400 text-xs">{processingStatus || 'Generating...'}</p>
+                  <p className="mt-1 flex items-center justify-center gap-1 text-xs text-zinc-500 tabular-nums">
+                    <Clock className="h-3 w-3" />
+                    {formatClock(elapsedMs)}
+                  </p>
                   {onCancel && (
                     <button
                       onClick={() => { setStopRequested(true); onCancel() }}

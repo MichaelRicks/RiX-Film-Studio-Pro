@@ -1,5 +1,5 @@
 ---
-name: rix-prompt-sheet
+name: rix-ingredients-prompt
 description: Write a video prompt for RiX Film Studio Pro's Generate screen (LTX 2.5) when the reference image is a reference sheet (character turnaround, prop sheet, location sheet, or a combined sheet with several panels), then put it in the prompt box with the set_generation_prompt tool. Supports single-shot and multi-shot output. Use when the user says "character reference sheet", "reference sheet", "ingredients", or the image shows several labelled panels of a character, props or a setting.
 ---
 
@@ -21,8 +21,13 @@ Don't call `rix_status`: there is no project or timeline to check here.
 1. `inspect_media` the sheet with `frames: 1` and a width of 1280 or more, so small panels and
    printed notes are legible. Look before you write.
 2. Map the panels: for each one, note its position (Top Row Left, Middle Row Right, Bottom Row,
-   Left Column...) and whether it is a Character, Prop, or Setting. Read any printed notes (wardrobe,
-   age, personality) and use them as extra detail.
+   Left Column...) and whether it is a Character, Outfit, Prop, or Setting. Read any printed notes
+   (wardrobe, age, personality) and use them as extra detail. Count every panel, small ones at the
+   edges and in the bottom row included, and give EACH its own entry in Part 1; skipping one means
+   the video never sees it. A small tile that shows a garment (a clothing sheet, a flat-lay, a
+   figure in a different outfit) is an **Outfit** panel and normally wins over the clothing worn in
+   the big character photo. If the outfit tile is too small to read, inspect the sheet again at
+   width 1920 and describe what you can see: colour, material, cut, trim, pattern.
 3. Write the prompt in the two-part format below.
 4. Call `set_generation_prompt` with the prompt text only, plus `image_path` (the sheet's absolute
    path), `thumbnail_only: true` (the sheet is never a first frame) and `folder` (a suggestion: the
@@ -108,8 +113,36 @@ appearance only. The video must be a different picture from it:
   not where the camera is or what happens.
 - Keep the wording of each identifying detail identical between Part 1 and Part 2 and across every
   shot, because the LoRA binds the text to the sheet's appearance.
+- **Outfit changes (the sheet shows the character in one outfit and an outfit panel shows another).**
+  The model copies whatever clothing sits next to the face, so the prompt must say which wins.
+  In Part 1, describe the character panel by face, hair and build only, and say plainly that the
+  clothing, veil, scarf or other headwear in that panel is not used in the scene ("her clothing in
+  this panel is not worn"). Describe the outfit panel as the garment she wears, by colour,
+  material and trim. In Part 2 state it at the first mention and again in every shot ("wearing the
+  navy brocade qipao, bare-headed, no veil"), and name any headwear or accessory from the character
+  photo that must NOT appear. Say it positively: she wears X.
+  If the outfit tile shows a person (a model or figure wearing the garment), her face, hair, skin
+  and body are NOT used: say so in Part 1 ("the figure's face and hair in this panel are not used,
+  only the garment"), because the model otherwise swaps the face. The face always comes from the
+  Character panel.
 - If the sheet carries several outfits or locations, name the one in use ("the black leather vest
   and denim outfit") so it is not blended with the others.
+
+### What the official Ingredients example does (copy these habits)
+The LTX model card's own sample sheet has a character in front, side and back views, a controller
+shown from three angles, a t-shirt, and a wide bedroom. Its prompt shows:
+- Panel entries are named by where they really are on the sheet, in a grid vocabulary: Top Row
+  Left, Top Row Right, Middle Row Right, Bottom Row, each with a role in brackets: (Character),
+  (Prop), (Setting). Name each panel by its actual position, one entry per panel or panel group.
+- A prop panel can become clothing in the scene. The t-shirt sits on the sheet as a Prop, and in the
+  target the woman wears it. Say so plainly ("She wears the dark olive short-sleeved t-shirt...").
+- The sheet's views (front, side, back) are described in Part 1 as views, then Part 2 uses the
+  person once, in one action, never as a turnaround.
+- Part 2 opens on the place, then the camera ("The camera holds a steady, static medium shot"),
+  then the character already doing something, then the light on her face, then expression beats
+  with short pauses ("She pauses for a split second..."), dialogue in quotes, and ends by naming
+  the softly blurred background. One flowing paragraph, no lists.
+- Part 1 stays pure description of the sheet; every detail is worded again, identically, in Part 2.
 
 ## Anatomy and motion (prevents warped limbs and twisting)
 The user has seen malformed, twisting bodies and limbs. Use positive wording only:

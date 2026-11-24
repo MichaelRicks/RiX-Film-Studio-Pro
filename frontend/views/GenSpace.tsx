@@ -2854,8 +2854,10 @@ export function GenSpace() {
   // When video generation completes, add to project assets
   // Render stopwatch: (re)start when a generation begins, tick while running,
   // and freeze the last value when it stops (the cleanup clears the interval).
+  // IC-LoRA runs have their own in-flight flag, so they feed the same stopwatch.
+  const stopwatchRunning = isGenerating || isIcLoraGenerating
   useEffect(() => {
-    if (!isGenerating) return
+    if (!stopwatchRunning) return
     generationStartRef.current = Date.now()
     setElapsedMs(0)
     const id = setInterval(() => {
@@ -2864,7 +2866,7 @@ export function GenSpace() {
       }
     }, 200)
     return () => clearInterval(id)
-  }, [isGenerating])
+  }, [stopwatchRunning])
 
   useEffect(() => {
     if (!videoPath || !currentProjectId || isGenerating) return
@@ -3246,6 +3248,8 @@ export function GenSpace() {
     // Imported in-page; drop the recovery marker so a remount can't re-import the
     // backend's sticky GenerationComplete as a duplicate standalone asset.
     localStorage.removeItem(GENERATION_RECOVERY_KEY)
+    // Wall-clock render time, shown on the asset tile and in the preview like other generations.
+    const icLoraRenderMs = generationStartRef.current != null ? Date.now() - generationStartRef.current : undefined
 
     ;(async () => {
       const copied = await addVisualAssetToProject(icLoraResult.videoPath, currentProjectId, 'video')
@@ -3287,6 +3291,7 @@ export function GenSpace() {
           height: copied.height,
           prompt: submission.prompt,
           resolution: '',
+          renderMs: icLoraRenderMs,
           generationParams: {
             mode: 'ic-lora',
             prompt: submission.prompt,
@@ -3509,7 +3514,7 @@ export function GenSpace() {
   // "Prompt with Claude": Claude's set_generation_prompt lands here, on the same undo/redo
   // history as an Enhance result.
   const [promptWithClaudeOpen, setPromptWithClaudeOpen] = useState(false)
-  // Image mode: "Prompt with Claude" asks the reference-sheet questions instead (rix-sheet-maker).
+  // Image mode: "Prompt with Claude" asks the reference-sheet questions instead (rix-ingredients-sheet).
   const [sheetMakerOpen, setSheetMakerOpen] = useState(false)
   const promptRef = useRef(prompt)
   promptRef.current = prompt
@@ -4993,6 +4998,7 @@ export function GenSpace() {
             conditioningStrength={icLoraStrength}
             onConditioningStrengthChange={setIcLoraStrength}
             outputVideoPath={icLoraResult?.videoPath || null}
+            elapsedMs={elapsedMs}
             onChange={setIcLoraInput}
           />
           <LoraLibraryModal
@@ -5077,7 +5083,7 @@ export function GenSpace() {
           />
         )}
 
-        {sheetMakerOpen && <SheetMakerModal inputImage={inputImage} onClose={() => setSheetMakerOpen(false)} />}
+        {sheetMakerOpen && <SheetMakerModal inputImage={inputImage} onUseCanvas={setInputImage} onCleanup={(p, pr) => { setInputImage(p); setPrompt(pr) }} onClose={() => setSheetMakerOpen(false)} />}
 
         {promptWithClaudeOpen && (
           <PromptWithClaudeModal

@@ -11,7 +11,7 @@ import { logger } from '../logger'
  * login — RiX never touches Claude credentials) can drive the RiX editor:
  *   1. registers this install's MCP endpoint (url + bearer token) as a user-scope
  *      MCP server named "rix-editor" in Claude Code;
- *   2. installs the bundled skills (rix-editor, rix-prompt, rix-prompt-sheet) into ~/.claude/skills;
+ *   2. installs the bundled skills (rix-editor, rix-prompt, rix-ingredients-prompt) into ~/.claude/skills;
  *   3. allows the calls "Prompt with Claude" needs (inspect_media, set_generation_prompt, plus
  *      list_prompt_folders / save_prompt for the "save this prompt?" step) and its two skills in
  *      ~/.claude/settings.json, so Claude doesn't ask before each step. None of them generates,
@@ -20,10 +20,10 @@ import { logger } from '../logger'
  */
 
 // rix-editor: cutting/exporting in the Video Editor. rix-prompt: "Prompt with Claude" on Generate.
-// rix-prompt-sheet: the same, when the image is a character/reference sheet.
+// rix-ingredients-prompt: the same, when the image is a character/reference sheet.
 // rix-lens: the Natural / Cinematic / Blockbuster look and flare switch picked in that same dialog.
-// rix-sheet-maker: writes the still-image prompts that make the reference sheets for rix-prompt-sheet.
-const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-prompt-sheet', 'rix-lens', 'rix-sheet-maker'] as const
+// rix-ingredients-sheet: writes the still-image prompts that make the reference sheets for rix-ingredients-prompt.
+const SKILL_NAMES = ['rix-editor', 'rix-prompt', 'rix-ingredients-prompt', 'rix-lens', 'rix-ingredients-sheet'] as const
 type SkillName = (typeof SKILL_NAMES)[number]
 // Dev builds register under their own name: they have a different token than an
 // installed build on the same machine, and sharing one name would make each
@@ -39,9 +39,9 @@ export const ALLOW_RULES = [
   `mcp__${SERVER_NAME}__list_prompt_folders`,
   `mcp__${SERVER_NAME}__save_prompt`,
   'Skill(rix-prompt)',
-  'Skill(rix-prompt-sheet)',
+  'Skill(rix-ingredients-prompt)',
   'Skill(rix-lens)',
-  'Skill(rix-sheet-maker)',
+  'Skill(rix-ingredients-sheet)',
 ]
 const skillDir = (name: SkillName) => path.join(os.homedir(), '.claude', 'skills', name)
 const skillPath = (name: SkillName) => path.join(skillDir(name), 'SKILL.md')
@@ -167,11 +167,24 @@ function allowPromptCalls(): void {
   fs.renameSync(tmp, file)
 }
 
+// Skills renamed in 1.9.0 (the two Ingredients skills). Their old SKILL.md is set aside so Claude
+// does not load a second, outdated copy next to the new one.
+const LEGACY_SKILL_NAMES = ['rix-prompt-sheet', 'rix-sheet-maker']
+function retireLegacySkills(): void {
+  for (const n of LEGACY_SKILL_NAMES) {
+    try {
+      const p = path.join(os.homedir(), '.claude', 'skills', n, 'SKILL.md')
+      if (fs.existsSync(p)) fs.renameSync(p, `${p}.bak-renamed`)
+    } catch (e) { logger.warn(`[Connect Claude] could not retire old skill ${n}: ${String(e)}`) }
+  }
+}
+
 export function connectClaude(endpoint: Endpoint, opts: { updateSkill?: boolean } = {}) {
   const cli = findClaudeCli()
   let via: 'cli' | 'config'
   if (cli && registerViaCli(cli, endpoint)) via = 'cli'
   else { registerViaConfig(endpoint); via = 'config' }
+  retireLegacySkills()
   const results = SKILL_NAMES.map(n => installSkill(n, opts.updateSkill === true))
   try { allowPromptCalls() } catch (e) { logger.warn(`[Connect Claude] could not update permissions: ${String(e)}`) }
   // One summary value for the UI: anything installed/updated wins over kept/current.

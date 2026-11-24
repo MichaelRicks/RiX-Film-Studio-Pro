@@ -1,6 +1,6 @@
 ---
 name: rix-lens
-description: Blockbuster anamorphic look for RiX Film Studio Pro (LTX 2.5), with three selectable looks (Natural, Cinematic, Blockbuster) and a lens-flare switch. Writes still-image prompts for character sheets, anamorphic location plates and hard-light lighting plates (first frames and ingredients), and builds a compact LOOK LOCK to restate in every shot of a rix-prompt or rix-prompt-sheet prompt. Use when the user says LENS, anamorphic, blockbuster look, cinematic look, lens flare, lighting plate, location plate, or says their videos look flat.
+description: Blockbuster anamorphic look for RiX Film Studio Pro (LTX 2.5), with three selectable looks (Natural, Cinematic, Blockbuster) and a lens-flare switch. Writes still-image prompts for character sheets, anamorphic location plates and hard-light lighting plates (first frames and ingredients), and builds a compact LOOK LOCK to restate in every shot of a rix-prompt or rix-ingredients-prompt prompt. Use when the user says LENS, anamorphic, blockbuster look, cinematic look, lens flare, lighting plate, location plate, or says their videos look flat.
 ---
 
 # RiX LENS: selectable cinematic looks
@@ -44,7 +44,7 @@ FLARE. The looks switch them on and off.
 
 | Look | LENS part | LIGHT part | Use for |
 |---|---|---|---|
-| **Natural** | off | off (plain rix-prompt wording) | Dialogue, groups, comedy, documentary realism. Default for rix-prompt and rix-prompt-sheet. |
+| **Natural** | off | off (plain rix-prompt wording) | Dialogue, groups, comedy, documentary realism. Default for rix-prompt and rix-ingredients-prompt. |
 | **Cinematic** | on | soft version: one direction, gentle falloff, face readable | Filmic without the risk. Safe for faces. |
 | **Blockbuster** | on | hard version: hard key, rim, deep textured shadow, shadow-side line when it suits | Hero shots, night, tension, trailers. |
 
@@ -82,7 +82,7 @@ panel; costume detail inserts of [items]. Face panel framed like an 85mm portrai
 a 50mm. Soft even studio light, true-to-life skin with pores and fine texture, real fabric weight
 and wear. Identical face, costume and proportions in every panel. Photoreal, no text, no watermark.
 
-Hand the result to `rix-prompt-sheet`.
+Hand the result to `rix-ingredients-prompt`.
 
 ## STAGE 2: Anamorphic location plate (Cinematic and Blockbuster)
 Pick the lens before the shot:
@@ -118,7 +118,7 @@ characters, no text, no watermark. Aspect ratio 2.39:1.
 
 To use a plate as a first frame, it should contain the character; generate the plate with the
 character in it, or use the plate as an ingredient. A plate with no characters suits establishing
-shots and `rix-prompt-sheet` Setting panels.
+shots and `rix-ingredients-prompt` Setting panels.
 
 ## STAGE 3: Lighting plate (Blockbuster; a soft version for Cinematic)
 Video models pull every shot toward even exposure; typing "darker" only goes so far. Make light that
@@ -180,7 +180,7 @@ Skip it for comedy beats, wides where several faces must read, daylight exterior
   lighting and framing words of shot 1 (matching what the image shows) and repeat the same LENS,
   LIGHT (and FLARE) words at each cut, after the subject re-description. Hard cuts only, no
   dissolves.
-- `rix-prompt-sheet`: put the lock in Part 2 only, never Part 1 (Part 1 describes the sheet).
+- `rix-ingredients-prompt`: put the lock in Part 2 only, never Part 1 (Part 1 describes the sheet).
 - Respect the anatomy and motion rules. Keep hands resting; slow, simple motion still applies.
 - Busy scene, many cuts: fewer lock words per shot (the LIGHT part plus "anamorphic film look").
   A two-hander or single master shot can carry the full lock.
