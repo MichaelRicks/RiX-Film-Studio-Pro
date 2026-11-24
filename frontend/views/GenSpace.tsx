@@ -4321,7 +4321,13 @@ export function GenSpace() {
   // error is waiting to be read. Jobs wait in the order shown in the queue panel.
   useEffect(() => {
     if (genQueue.length === 0 || launchingRef.current) return
-    if (slotBusyLocally || isOtherGenerationRunning || isAnyLocalGenerationInFlight) return
+    // An IC-LoRA result stays on screen in the Output panel after it is saved (it is never
+    // reset), so "a result is held" must not block the queue forever: only wait while it is
+    // still waiting to be saved (its submission is cleared as soon as the save starts).
+    const icLoraSaving = !!icLoraResult && icLoraSubmissionRef.current != null
+    const localBusy = isGenerating || isRetaking || isExtending || isIcLoraGenerating
+      || !!videoPath || imagePaths.length > 0 || !!retakeResult || !!extendResult || icLoraSaving
+    if (slotBusyLocally || isOtherGenerationRunning || localBusy) return
     if (error || localError) return
     const [next, ...rest] = genQueue
     launchingRef.current = true
@@ -4333,7 +4339,7 @@ export function GenSpace() {
         launchingRef.current = false
         setDispatchTick(t => t + 1)
       })
-  }, [genQueue, dispatchTick, slotBusyLocally, isOtherGenerationRunning, isAnyLocalGenerationInFlight, error, localError])
+  }, [genQueue, dispatchTick, slotBusyLocally, isOtherGenerationRunning, isGenerating, isRetaking, isExtending, isIcLoraGenerating, videoPath, imagePaths.length, retakeResult, extendResult, icLoraResult, error, localError])
 
   useEffect(() => {
     if (!slotBusyLocally && genQueue.length === 0) setActiveJobLabel(null)
