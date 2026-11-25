@@ -22,7 +22,7 @@ import {
   type GpmPromptFolder, type GpmImageFolder, type GpmImage, gpmId,
   setPromptImagePath, loadPromptFolders, savePromptFolders, loadImageFolders, saveImageFolders,
   loadImages, putImage, deleteImage, exportBackup, importBackup, parseBackup,
-  loadAllPromptThumbs, setPromptThumb, deletePromptThumb, downscaleToThumb, getPromptImagePath, GPM_PROMPTS_CHANGED,
+  loadAllPromptThumbs, setPromptThumb, deletePromptThumb, downscaleToThumb, getPromptImagePath, getPromptLoras, GPM_PROMPTS_CHANGED,
   type GpmWorkflow, loadWorkflows, saveWorkflows,
   type GpmPerformance, loadPerformances, savePerformances, loadWorkingPerf, saveWorkingPerf,
   type GpmPanorama, loadPanoramas, putPanorama, deletePanorama, MAX_PANORAMAS,
@@ -1180,8 +1180,8 @@ async function dataUrlFromImageDrop(e: React.DragEvent): Promise<{ dataUrl: stri
 }
 
 function PromptsPanel({
-  ctl, onCopy, onInject, onInjectImage, flash, wide = false,
-}: { ctl: SectionCtl; onCopy: (t: string) => void; onInject: (t: string) => void; onInjectImage: (path: string) => void; flash: (m: string) => void; wide?: boolean }) {
+  ctl, onCopy, onInject, onInjectImage, onInjectLoras, flash, wide = false,
+}: { ctl: SectionCtl; onCopy: (t: string) => void; onInject: (t: string) => void; onInjectImage: (path: string) => void; onInjectLoras?: (loras: { ref: string; name: string; scale: number }[]) => void; flash: (m: string) => void; wide?: boolean }) {
   const [folders, setFolders] = useState<GpmPromptFolder[]>([])
   const [search, setSearch] = useState('')
   const [newFolder, setNewFolder] = useState('')
@@ -1351,7 +1351,7 @@ function PromptsPanel({
                         {p.text || <span style={{ color: C.faint }}>(empty)</span>}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        <button onClick={() => { onInject(p.text); void getPromptImagePath(p.id).then((path) => {
+                        <button onClick={() => { onInject(p.text); void getPromptLoras(p.id).then((l) => { if (l && l.length > 0) onInjectLoras?.(l) }).catch(() => {}); void getPromptImagePath(p.id).then((path) => {
                           if (path) { onInjectImage(path); flash('Prompt and image injected') }
                           else if (thumbs[p.id]) {
                             // Older cue with no stored original: fall back to the 360px thumbnail so the image still loads.
@@ -1570,7 +1570,7 @@ function ImagesPanel({ ctl, onCopy, onUse, flash }: { ctl: SectionCtl; onCopy: (
 
 /* ---- Dock ----------------------------------------------------------------- */
 function Dock({ onClose }: { onClose: () => void }) {
-  const { setGenSpacePromptInjection, setCurrentTab, setGenSpaceInputImagePath, clearGenSpacePrompt } = useProjects()
+  const { setGenSpacePromptInjection, setCurrentTab, setGenSpaceInputImagePath, setGenSpaceLoraInjection, clearGenSpacePrompt } = useProjects()
 
   const [gpmTab, setGpmTab] = useState<GpmTab>('performance')
   // Where every panel's "Inject" button sends its text: the main LTX Create
@@ -1724,7 +1724,7 @@ function Dock({ onClose }: { onClose: () => void }) {
       {tab === 'shot' && <ShotPanel shot={shot} setShot={setShot} ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onUseImage={sendImageToGenSpace} flash={flash} srcImage={shotSrcImage} setSrcImage={setShotSrcImage} />}
       {tab === 'camera' && <CameraPanel search={search} setSearch={setSearch} camCat={camCat} setCamCat={setCamCat} onInject={injectIntoPrompt} flash={flash} />}
       {tab === 'workflow' && <WorkflowPanel wf={wf} setWf={setWf} perfText={perfText} ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onUseImage={sendImageToGenSpace} flash={flash} />}
-      {tab === 'prompts' && <PromptsPanel ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onInjectImage={(path) => { if (injectTarget !== 'qwen') setGenSpaceInputImagePath(path) }} flash={flash} wide={wide} />}
+      {tab === 'prompts' && <PromptsPanel ctl={ctl} onCopy={copyText} onInject={injectIntoPrompt} onInjectImage={(path) => { if (injectTarget !== 'qwen') setGenSpaceInputImagePath(path) }} onInjectLoras={(l) => { if (injectTarget !== 'qwen') setGenSpaceLoraInjection(l) }} flash={flash} wide={wide} />}
       {tab === 'images' && <ImagesPanel ctl={ctl} onCopy={copyText} onUse={sendImageToGenSpace} flash={flash} />}
       {tab === 'plates' && <PlatesPanel onUse={sendImageToGenSpace} flash={flash} activeId={platesActiveId} setActiveId={setPlatesActiveId} sceneLens={sceneLens} setSceneLens={setSceneLens} sceneAimRef={sceneAimRef} />}
       {tab === 'qwenAngle' && <QwenMultiAnglePanel state={qwenAngleState} setState={setQwenAngleState} onUse={sendImageToGenSpace} flash={flash} injectTarget={injectTarget} setInjectTarget={setInjectTarget} />}

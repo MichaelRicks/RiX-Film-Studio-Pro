@@ -4,8 +4,8 @@
  * prompt library, so a prompt Claude wrote doesn't have to be copied into a folder by hand.
  */
 import {
-  gpmId, loadPromptFolders, savePromptFolders, setPromptThumb, setPromptImagePath, downscaleToThumb, GPM_PROMPTS_CHANGED,
-  type GpmPromptFolder,
+  gpmId, loadPromptFolders, savePromptFolders, setPromptThumb, setPromptImagePath, setPromptLoras, downscaleToThumb, GPM_PROMPTS_CHANGED,
+  type GpmPromptFolder, type PromptLora,
 } from '../components/gpm/gpm-storage'
 
 export interface PromptFolderSummary { name: string; prompts: number }
@@ -17,7 +17,7 @@ export async function listPromptFolders(): Promise<{ folders: PromptFolderSummar
   return { folders: folders.map(f => ({ name: f.name, prompts: f.prompts.length })) }
 }
 
-export interface SavePromptArgs { folder?: unknown; prompt?: unknown; image_path?: unknown; thumbnail_only?: unknown }
+export interface SavePromptArgs { folder?: unknown; prompt?: unknown; image_path?: unknown; thumbnail_only?: unknown; loras?: PromptLora[] }
 export interface SavePromptResult {
   ok: true
   folder: string
@@ -46,6 +46,10 @@ export async function savePromptToLibrary(args: SavePromptArgs): Promise<SavePro
 
   // Only (re)write the folders when something changed; a duplicate may still gain a thumbnail below.
   if (!existing) await savePromptFolders(folders)
+
+  // The LoRAs selected in Create when saving from RiX (Claude's own save_prompt sends none, so it
+  // never wipes ones saved earlier).
+  if (args.loras && args.loras.length > 0) await setPromptLoras(target.id, args.loras)
 
   let thumbnail: SavePromptResult['thumbnail'] = 'none'
   const imagePath = typeof args.image_path === 'string' ? args.image_path.trim() : ''

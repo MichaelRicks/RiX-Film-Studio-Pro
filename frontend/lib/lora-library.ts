@@ -189,6 +189,31 @@ export function resolveInstalledPath(
 // absolute so a project survives a reinstall or a move to another machine — modelsDir
 // varies per install. The backend resolves relative refs against modelsDir directly
 // (resolve_lora_ref), so no conversion back to absolute is needed to use one.
+/** A LoRA as stored with a clip or a saved prompt: ref is relative to the models folder. */
+export interface SavedLoraRef { ref: string; name: string; scale: number }
+
+/**
+ * Re-select saved LoRAs against what is installed now. Matches every LoRA file on disk (the user's
+ * own trained LoRAs included, which the catalog-only library list leaves out). Returns the ones
+ * found as selections (absolute path refs) and the names of any that are missing.
+ */
+export function matchSavedLoras(
+  saved: SavedLoraRef[],
+  installed: { path: string }[],
+  modelsDir: string,
+): { found: { ref: string; name: string; scale: number }[]; missing: string[] } {
+  const found: { ref: string; name: string; scale: number }[] = []
+  const missing: string[] = []
+  for (const s of saved) {
+    const want = normalizeSlashes(s.ref).toLowerCase()
+    const hit = installed.find(m => normalizeSlashes(toModelsDirRelativeRef(m.path, modelsDir)).toLowerCase() === want
+      || normalizeSlashes(m.path).toLowerCase() === want)
+    if (hit) found.push({ ref: hit.path, name: s.name, scale: s.scale })
+    else missing.push(s.name)
+  }
+  return { found, missing }
+}
+
 export function toModelsDirRelativeRef(absPath: string, modelsDir: string): string {
   if (!modelsDir) return absPath
   const base = normalizeSlashes(modelsDir).replace(/\/+$/, '')

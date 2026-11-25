@@ -226,6 +226,19 @@ export async function setPromptImagePath(promptId: string, path: string): Promis
   map[promptId] = path
   await kvSet(KEY_PROMPT_IMAGES, map)
 }
+/** LoRAs that were selected when a prompt was saved (refs relative to the models folder), so Inject
+ *  can select them again: a character LoRA left off makes a different person. */
+export interface PromptLora { ref: string; name: string; scale: number }
+const KEY_PROMPT_LORAS = 'gpm_prompt_loras_v1'
+export async function getPromptLoras(promptId: string): Promise<PromptLora[] | undefined> {
+  return (await kvGet<Record<string, PromptLora[]>>(KEY_PROMPT_LORAS, {}))[promptId]
+}
+export async function setPromptLoras(promptId: string, loras: PromptLora[]): Promise<void> {
+  const map = await kvGet<Record<string, PromptLora[]>>(KEY_PROMPT_LORAS, {})
+  if (loras.length > 0) map[promptId] = loras
+  else delete map[promptId]
+  await kvSet(KEY_PROMPT_LORAS, map)
+}
 export function setPromptThumb(promptId: string, thumb: string): Promise<IDBValidKey> {
   return tx<IDBValidKey>(THUMB_STORE, 'readwrite', (s) => s.put({ promptId, _thumb: thumb }))
 }

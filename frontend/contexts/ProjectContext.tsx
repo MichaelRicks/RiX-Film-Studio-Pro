@@ -65,6 +65,9 @@ interface ProjectContextType {
   // (used by Prompt Manager Pro's "send to Gen Space" / drag-drop).
   genSpaceInputImagePath: string | null
   setGenSpaceInputImagePath: (path: string | null) => void
+  // LoRAs saved with an injected prompt (models-dir-relative refs), selected again in Create.
+  genSpaceLoraInjection: { ref: string; name: string; scale: number }[] | null
+  setGenSpaceLoraInjection: (loras: { ref: string; name: string; scale: number }[] | null) => void
   // Bumped to request clearing the Gen Space prompt box (Prompt Manager Pro).
   genSpacePromptClearNonce: number
   clearGenSpacePrompt: () => void
@@ -119,6 +122,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   const [pendingIcLoraUpdate, setPendingIcLoraUpdate] = useState<PendingIcLoraUpdate | null>(null)
   const [genSpacePromptInjection, setGenSpacePromptInjection] = useState<string | null>(null)
   const [genSpaceInputImagePath, setGenSpaceInputImagePath] = useState<string | null>(null)
+  const [genSpaceLoraInjection, setGenSpaceLoraInjection] = useState<{ ref: string; name: string; scale: number }[] | null>(null)
   const [genSpacePromptClearNonce, setGenSpacePromptClearNonce] = useState(0)
   const clearGenSpacePrompt = useCallback(() => setGenSpacePromptClearNonce((n) => n + 1), [])
 
@@ -497,6 +501,8 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       setGenSpacePromptInjection,
       genSpaceInputImagePath,
       setGenSpaceInputImagePath,
+      genSpaceLoraInjection,
+      setGenSpaceLoraInjection,
       genSpacePromptClearNonce,
       clearGenSpacePrompt,
     }}>

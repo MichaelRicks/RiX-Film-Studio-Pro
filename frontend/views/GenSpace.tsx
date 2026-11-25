@@ -73,7 +73,7 @@ import { ICLoraPanel, CONDITIONING_TYPES } from '../components/ICLoraPanel'
 import type { OutpaintPads } from '../components/OutpaintCanvasEditor'
 import { LoraLibraryModal } from '../components/LoraLibraryModal'
 import { SelectedLoraInfo } from '../components/SelectedLoraInfo'
-import { buildIcLoraSelectorOptions, encodeIcLoraSelectorValue, parseIcLoraSelectorValue, toModelsDirRelativeRef, variantDisplayName } from '../lib/lora-library'
+import { buildIcLoraSelectorOptions, encodeIcLoraSelectorValue, parseIcLoraSelectorValue, matchSavedLoras, toModelsDirRelativeRef, variantDisplayName } from '../lib/lora-library'
 import { SettingsDropdown } from '../components/SettingsDropdown'
 import { IcLoraSettingsControls, type IcLoraControlsProps } from '../components/IcLoraSettingsControls'
 import { IcLoraAdvancedPanel } from '../components/IcLoraAdvancedPanel'
@@ -2046,6 +2046,8 @@ export function GenSpace() {
     setGenSpacePromptInjection,
     genSpaceInputImagePath,
     setGenSpaceInputImagePath,
+    genSpaceLoraInjection,
+    setGenSpaceLoraInjection,
     genSpacePromptClearNonce,
     clearGenSpacePrompt,
   } = useProjects()
@@ -2096,6 +2098,8 @@ export function GenSpace() {
   // Lightbox "Reframe 9:16" mode — swaps the media for the crop-frame editor.
   const [reframing, setReframing] = useState(false)
   const [reframeNotice, setReframeNotice] = useState<string | null>(null)
+  // Saved LoRAs that Regenerate or Inject could not find (a notice, not an error, so the queue keeps going).
+  const [loraNotice, setLoraNotice] = useState<string | null>(null)
   useEffect(() => { setReframing(false); setReframeNotice(null) }, [selectedAsset?.id])
   // Lightbox "Trim start": drop the first N frames and save the result as a new asset.
   const [trimOpen, setTrimOpen] = useState(false)
@@ -2588,6 +2592,17 @@ export function GenSpace() {
     setInputImage(genSpaceInputImagePath)
     setGenSpaceInputImagePath(null)
   }, [genSpaceInputImagePath, setGenSpaceInputImagePath])
+
+  // LoRAs saved with a prompt injected from the Prompt Manager: select them so the character
+  // LoRA isn't forgotten. Waits until the installed LoRA list has loaded.
+  useEffect(() => {
+    if (!genSpaceLoraInjection || localLoras.length === 0) return
+    const { found, missing } = matchSavedLoras(genSpaceLoraInjection, localLoras, appSettings.modelsDir)
+    setMode('video')
+    setSelectedLoras(found)
+    setLoraNotice(missing.length > 0 ? `LoRA not found, so it is not selected: ${missing.join(', ')}. Put the file back in the models folder and select it before generating.` : null)
+    setGenSpaceLoraInjection(null)
+  }, [genSpaceLoraInjection, setGenSpaceLoraInjection, localLoras, appSettings.modelsDir])
 
   // Clear the prompt box on request from Prompt Manager Pro (skip initial mount).
   const lastClearNonce = useRef(genSpacePromptClearNonce)
@@ -4063,20 +4078,14 @@ export function GenSpace() {
     // Reproduce exactly: lock the asset's seed (the prompt bar shows Locked; one click
     // back to Random). Older assets without a saved seed leave the seed setting alone.
     if (params.seed != null) updateAppSettings({ seedLocked: true, lockedSeed: params.seed })
-    // Saved LoRA refs are models-dir-relative; re-select only those still installed.
-    setSelectedLoras(
-      (params.loras ?? []).flatMap((saved) => {
-        const match = loraLibrary.items.find(
-          (e) => e.installedPath
-            && toModelsDirRelativeRef(e.installedPath, appSettings.modelsDir) === saved.ref,
-        )
-        return match?.installedPath
-          ? [{ ref: match.installedPath, name: saved.name, scale: saved.scale }]
-          : []
-      }),
-    )
+    // Saved LoRA refs are models-dir-relative; re-select those still installed, the user's own
+    // trained LoRAs included (the library list only holds catalog ones). A missing character
+    // LoRA would make a different person, so say so.
+    const { found, missing } = matchSavedLoras(params.loras ?? [], localLoras, appSettings.modelsDir)
+    setSelectedLoras(found)
+    setLoraNotice(missing.length > 0 ? `LoRA not found, so it is not selected: ${missing.join(', ')}. Put the file back in the models folder and select it before generating.` : null)
     return startImage
-  }, [sanitizeVideoSettings, loraLibrary.items, appSettings.modelsDir, updateAppSettings, currentProjectId])
+  }, [sanitizeVideoSettings, localLoras, appSettings.modelsDir, updateAppSettings, currentProjectId])
 
   // "Revise with Claude" from the enlarged viewer: load this clip's prompt, first frame and
   // settings into Create (same as Regenerate), then open Prompt with Claude in Revise mode with
@@ -5067,6 +5076,12 @@ export function GenSpace() {
         )}
 
         {/* Selected plain LoRAs (video gen only) — one chip each, info from the matched catalog entry. */}
+        {loraNotice && (
+          <div className="mx-auto mb-2 flex max-w-3xl items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <span className="flex-1">{loraNotice}</span>
+            <button onClick={() => setLoraNotice(null)} className="text-amber-300 hover:text-white">Dismiss</button>
+          </div>
+        )}
         {mode === 'video' && isLocalMode && selectedLoras.length > 0 && (
           <SelectedLoraInfo items={selectedLoras.map(s => {
             const entry = loraLibrary.items.find(e => e.installedPath === s.ref)
@@ -5085,6 +5100,9 @@ export function GenSpace() {
             imagePath={savePromptOffer.imagePath}
             thumbnailOnly={savePromptOffer.thumbnailOnly}
             suggestedFolder={savePromptOffer.folder}
+            loras={mode === 'video' && canUseUserLoras
+              ? selectedLoras.map(l => ({ ref: toModelsDirRelativeRef(l.ref, appSettings.modelsDir), name: l.name, scale: l.scale }))
+              : undefined}
             onClose={() => setSavePromptOffer(null)}
           />
         )}
@@ -5097,6 +5115,8 @@ export function GenSpace() {
             ingredients={isIngredientsMode}
             existingPrompt={prompt}
             lastVideoPath={claudeVideoPath ?? videoPath}
+            onRemoveImage={() => setInputImage(null)}
+            onPickSeconds={(s) => setSettings(prev => ({ ...prev, duration: s }))}
             onClose={() => { setPromptWithClaudeOpen(false); setClaudeVideoPath(null) }}
           />
         )}

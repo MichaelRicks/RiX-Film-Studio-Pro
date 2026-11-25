@@ -46,6 +46,27 @@ export interface PromptBrief {
   // Lens flare strength 0 to 1 (0 = off), set with a slider.
   flare: number
   existingPrompt: string
+  // Clip length in seconds for quick test renders (null = let Claude choose).
+  seconds: number | null
+  // The user removed the first-frame image in this window: the prompt must stand on text alone.
+  imageRemoved: boolean
+}
+
+const LENGTHS = [5, 6, 8, 10] as const
+/** Most shots that still read at a given length (about 2.5 s or more per shot). */
+function maxShotsFor(seconds: number | null): ShotCount {
+  if (seconds == null) return 4
+  if (seconds <= 6) return 2
+  if (seconds <= 8) return 3
+  return 4
+}
+
+function lengthLines(brief: PromptBrief): string[] {
+  const s = brief.seconds
+  if (s == null) return []
+  return brief.mode === 'revise'
+    ? [`Length: make it a ${s}-second clip (a quick test render). Fit the prompt to ${s} seconds: cut or merge shots and trim actions so everything finishes in time, at most ${maxShotsFor(s)} shots. This overrides keeping the shot count. Tell me to set the duration to ${s} s.`]
+    : [`Length: ${s} seconds total (a quick test render). Fit every shot into ${s} seconds, about ${(s / Math.min(brief.shots, maxShotsFor(s))).toFixed(1)} s per shot, with actions small enough to finish in that time. Tell me to set the duration to ${s} s.`]
 }
 
 /** Plain words for the flare slider, so rix-lens knows how strong to make it. */
@@ -82,10 +103,14 @@ function buildReviseBrief(brief: PromptBrief): string {
     '',
     `What to change: ${brief.change.trim()}`,
     ...(brief.imagePath ? [`Reference image (look at it with inspect_media if it helps): ${brief.imagePath}`] : []),
+    ...(brief.imageRemoved
+      ? ['The first-frame image has been removed: the video now starts from text alone. Rewrite shot 1, and anything else that relied on the image, so the character (face, hair, build, clothing) and the setting are fully described in words.']
+      : []),
     ...(brief.lookAtResult && brief.resultVideoPath
       ? [`The video this prompt just produced is at ${brief.resultVideoPath}. Look at a few frames with inspect_media and use what you see to fix real problems (warped hands, flat light, wrong framing). The prompt above is still the source of truth for what I intended.`]
       : []),
     ...lookLines(brief, sheet),
+    ...lengthLines(brief),
     '',
     'Keep the whole revised prompt under 4500 characters (the LTX API refuses over 5000).',
     'Reply in one or two lines: what you changed, and the duration to set. Do not generate anything.',
@@ -116,9 +141,11 @@ It is attached to the Ingredients IC-LoRA as an appearance reference ONLY. Follo
       ? 'Dialogue: include a few short spoken lines if they suit the scene.'
       : 'Dialogue: none. Sound and ambience only.',
     ...lookLines(brief, sheet),
-    ...(brief.existingPrompt.trim()
-      ? ['', `The prompt box currently says (treat it as rough notes, not as text to keep): ${brief.existingPrompt.trim()}`]
-      : []),
+    // A new prompt starts clean: the old prompt-box text is never passed along, so nothing from the
+    // previous scene (place, outfit, action, dialogue) leaks into it. Revise mode is for building on it.
+    '',
+    'This is a fresh prompt. Use only the image and the idea above; do not reuse anything from earlier prompts or conversations.',
+    ...lengthLines(brief),
     '',
     'Keep the whole prompt under 4500 characters (the LTX API refuses over 5000).',
     'Write it, call set_generation_prompt, then tell me the shot count and the duration to set. Do not generate anything.',
@@ -137,8 +164,12 @@ interface Run {
 type McpStatus = Awaited<ReturnType<typeof window.electronAPI.mcpGetStatus>>
 type ConnectStatus = Awaited<ReturnType<typeof window.electronAPI.claudeConnectStatus>>
 
-export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath, ingredients = false, onClose }: {
+export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath, ingredients = false, onRemoveImage, onPickSeconds, onClose }: {
   imagePath: string | null
+  /** Clears the first-frame image in RiX too, so the next generation starts from text alone. */
+  onRemoveImage?: () => void
+  /** Sets RiX's Duration to the clip length picked here. */
+  onPickSeconds?: (seconds: number) => void
   /** IC-LoRA mode with Ingredients: the image is a reference sheet, never a first frame. */
   ingredients?: boolean
   existingPrompt: string
@@ -159,7 +190,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
     mode: existingPrompt.trim() ? 'revise' : 'new', change: '',
     resultVideoPath: lastVideoPath ?? null, lookAtResult: !!lastVideoPath,
     imagePath, imageKind: ingredients ? 'sheet' : 'first-frame', ingredients, idea: '', shots: 3, dialogue: true,
-    look: existingPrompt.trim() ? 'keep' : 'natural', flare: 0, existingPrompt,
+    look: existingPrompt.trim() ? 'keep' : 'natural', flare: 0, existingPrompt, seconds: null, imageRemoved: false,
   })
   const set = <K extends keyof PromptBrief>(k: K, v: PromptBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
 
@@ -229,7 +260,15 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
     setRun({ runId: r.runId, sessionId, phase: 'running', lines: ['Starting Claude…'], reply: '' })
   }
   const revise = brief.mode === 'revise'
-  const sheetKind = brief.imageKind === 'sheet' && !!imagePath
+  const sheetKind = brief.imageKind === 'sheet' && !!brief.imagePath
+  const removeImage = () => {
+    setBrief(b => ({ ...b, imagePath: null, imageKind: 'first-frame', imageRemoved: true }))
+    onRemoveImage?.()
+  }
+  const pickSeconds = (v: number | null) => {
+    setBrief(b => ({ ...b, seconds: v, shots: Math.min(b.shots, maxShotsFor(v)) as ShotCount }))
+    if (v != null) onPickSeconds?.(v)
+  }
   const needsChange = revise && !brief.change.trim()
   const setMode = (m: 'new' | 'revise') => setBrief(b => ({ ...b, mode: m, look: m === 'revise' ? 'keep' : (b.look === 'keep' ? 'natural' : b.look) }))
   const writeHere = () => { void startRun(prompt) }
@@ -371,15 +410,24 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
 
           {!run && (<>
           <div className="flex items-start gap-3">
-            {imagePath ? (
-              <img src={pathToFileUrl(imagePath)} alt="" className="h-20 w-32 object-cover rounded-lg border border-zinc-700 flex-shrink-0" />
+            {brief.imagePath ? (
+              <div className="flex-shrink-0 flex flex-col items-center gap-1">
+                <img src={pathToFileUrl(brief.imagePath)} alt="" className="h-20 w-32 object-cover rounded-lg border border-zinc-700" />
+                {!ingredients && (
+                  <button type="button" onClick={removeImage}
+                    title="Take the first frame out of RiX and write the prompt from text alone"
+                    className="text-[11px] text-zinc-400 hover:text-red-300 transition-colors">
+                    Remove image
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="h-20 w-32 rounded-lg border border-dashed border-zinc-700 flex items-center justify-center text-[11px] text-zinc-500 flex-shrink-0 text-center px-2">
                 No image
               </div>
             )}
             <div className="space-y-2 min-w-0">
-              {imagePath && !ingredients && (
+              {brief.imagePath && !ingredients && (
                 <div className="flex gap-2">
                   {([['first-frame', 'First frame'], ['sheet', 'Reference sheet (Ingredients)']] as [ImageKind, string][]).map(([k, label]) => (
                     <button key={k} onClick={() => set('imageKind', k)}
@@ -391,10 +439,12 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
                 </div>
               )}
               <p className="text-xs text-zinc-400 leading-relaxed">
-                {!imagePath
+                {!brief.imagePath
                   ? ingredients
                     ? 'No reference sheet is loaded. Import one above first, so Claude can describe it.'
-                    : 'No first-frame image is set. Claude will write the prompt from your idea alone. Add an image first for the best consistency.'
+                    : brief.imageRemoved
+                      ? 'Image removed. Claude will describe the character and setting in words, and the next generation starts without a first frame.'
+                      : 'No first-frame image is set. Claude will write the prompt from your idea alone. Add an image first for the best consistency.'
                   : brief.imageKind === 'sheet'
                     ? ingredients
                       ? 'Claude will read this sheet (character, outfit, location, props) and write a new scene that uses only the parts your idea needs. The sheet is appearance reference only and is kept out of the picture.'
@@ -434,8 +484,9 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
             <label className={labelCls}>Shots</label>
             <div className="flex gap-2">
               {((sheetKind ? [1, 2, 3, 4] : [2, 3, 4]) as ShotCount[]).map(n => (
-                <button key={n} onClick={() => set('shots', n)}
-                  className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${
+                <button key={n} onClick={() => set('shots', n)} disabled={n > maxShotsFor(brief.seconds)}
+                  title={n > maxShotsFor(brief.seconds) ? `Too many shots for a ${brief.seconds}-second clip` : undefined}
+                  className={`flex-1 py-2 rounded-lg text-sm border transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                     brief.shots === n ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
                   }`}
                 >{n === 1 ? 'Single' : n}</button>
@@ -444,6 +495,24 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
           </div>
 
           </>)}
+
+          <div>
+            <label className={labelCls}>Length</label>
+            <div className="flex gap-2">
+              {([null, ...LENGTHS] as (number | null)[]).map(v => (
+                <button key={v ?? 'auto'} onClick={() => pickSeconds(v)}
+                  className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${
+                    brief.seconds === v ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
+                  }`}
+                >{v == null ? (revise ? 'Keep' : 'Auto') : `${v} s`}</button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-zinc-500 leading-relaxed">
+              {brief.seconds == null
+                ? (revise ? 'Keep the current length.' : 'Claude picks the length.')
+                : `Claude fits the prompt into ${brief.seconds} seconds and RiX's Duration is set to match. Short clips at 720p render fast for testing whether a shot works.`}
+            </p>
+          </div>
 
           <div>
             <label className={labelCls}>Look</label>
@@ -466,7 +535,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
                 <span className="w-10 text-right text-xs text-zinc-400 tabular-nums">{brief.flare <= 0 ? 'Off' : brief.flare.toFixed(1)}</span>
               </div>
             )}
-            {(brief.look === 'cinematic' || brief.look === 'blockbuster') && imagePath && brief.imageKind === 'first-frame' && (
+            {(brief.look === 'cinematic' || brief.look === 'blockbuster') && brief.imagePath && brief.imageKind === 'first-frame' && (
               <p className="mt-1.5 text-[11px] text-amber-300/80 leading-relaxed">
                 Your first-frame image sets the light. To change the light itself, use a different image.
               </p>

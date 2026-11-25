@@ -13,7 +13,9 @@ import { listPromptFolders, savePromptToLibrary } from '../lib/prompt-library-br
 const NEW = '__new__'
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
 
-export function SavePromptDialog({ prompt, imagePath, thumbnailOnly, suggestedFolder, onClose }: {
+export function SavePromptDialog({ prompt, imagePath, thumbnailOnly, suggestedFolder, loras, onClose }: {
+  /** LoRAs selected in Create, saved with the prompt so Inject selects them again. */
+  loras?: { ref: string; name: string; scale: number }[]
   prompt: string
   imagePath?: string
   thumbnailOnly?: boolean
@@ -46,7 +48,7 @@ export function SavePromptDialog({ prompt, imagePath, thumbnailOnly, suggestedFo
     setSaving(true)
     setError(null)
     try {
-      const r = await savePromptToLibrary({ prompt, folder: folderName, image_path: imagePath, thumbnail_only: thumbnailOnly })
+      const r = await savePromptToLibrary({ prompt, folder: folderName, image_path: imagePath, thumbnail_only: thumbnailOnly, loras })
       setDone(`Saved to "${r.folder}"${r.createdFolder ? ' (new folder)' : ''}${r.thumbnail === 'attached' ? ' with thumbnail' : ''}.`)
       setTimeout(onClose, 1200)
     } catch (e) {
@@ -81,16 +83,27 @@ export function SavePromptDialog({ prompt, imagePath, thumbnailOnly, suggestedFo
 
           <div className="space-y-2">
             <label className="block text-xs font-medium text-zinc-400">Prompt Manager folder</label>
-            <select value={choice} onChange={(e) => setChoice(e.target.value)} className={fieldCls} disabled={folders === null}>
-              <option value={NEW}>New folder…</option>
-              {(folders ?? []).map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
+            {/* An inline list, not a <select>: the native popup closed itself on the first click when the
+                folder list (or Claude's suggested folder) arrived while it was open. */}
+            <div className="max-h-44 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-800 py-1">
+              {[NEW, ...(folders ?? [])].map(n => (
+                <button key={n} type="button" onClick={() => setChoice(n)}
+                  className={`block w-full text-left px-3 py-1.5 text-sm truncate transition-colors ${
+                    choice === n ? 'bg-[rgb(var(--accent)/0.2)] text-white' : 'text-zinc-300 hover:bg-zinc-700/60'
+                  }`}
+                >{n === NEW ? 'New folder…' : n}</button>
+              ))}
+              {folders === null && <p className="px-3 py-1.5 text-xs text-zinc-500">Loading folders…</p>}
+            </div>
             {choice === NEW && (
               <input
                 value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter' && canSave) void save() }}
                 placeholder="Folder name" className={fieldCls}
               />
+            )}
+            {loras && loras.length > 0 && (
+              <p className="text-[11px] text-zinc-500">LoRA saved with it (Inject selects it again): {loras.map(l => `${l.name} ${l.scale.toFixed(2)}`).join(', ')}</p>
             )}
             {imagePath && !thumbnailOnly && (
               <p className="text-[11px] text-zinc-500">The reference image is kept with it: Inject will load it as the first frame again.</p>
