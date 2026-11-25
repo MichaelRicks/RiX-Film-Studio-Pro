@@ -42,14 +42,26 @@ from the words, not from the image. At each cut repeat the identifying details (
 clothing, the one or two props, the lighting and the setting) in the same words as shot 1. This is
 the single biggest factor in consistency.
 
-**Name each transition in plain language:** "A hard cut transitions to…", "The view cuts to…",
-"A match cut connects…", "The image dissolves into…". Then restate the new framing: shot scale,
-camera angle, who is in frame, and the light if it changed.
+**Every cut is a hard cut.** Write each one as an instant cut, in these words: "Hard cut to
+[the new framing]..." or "The view cuts instantly to...". Never write dissolve, fade, blend, morph,
+"transitions to" or "slowly becomes": the model renders those as soft cross-dissolves. Make every
+cut an obvious jump so there is nothing to blend: change the shot scale AND the camera angle at
+each cut (wide to close-up, front to side or from behind), and end the shot before it on a still,
+held moment. Use a dissolve only when the user asks for one. Then restate the new framing: shot
+scale, camera angle, who is in frame, and the light if it changed.
 
 **Audio.** Say what is heard in shot 1 and carry it across every cut ("the low hum continues").
 Dialogue: keep each line short, quote it, and describe the voice once ("in a thin, cracked
 voice"), then reuse that description whenever the same person speaks. Give a different, clearly
 contrasting voice to a second speaker.
+
+**Pauses between lines.** Never put two quoted lines back to back. Between lines, write the
+silence as something seen and heard, with a length: "She stops, and for a long moment there is only
+the low hum. Then she says...", "He looks down; a beat of silence passes before he answers...". A
+"beat" is about 1 second; "a long pause" or "a few seconds of silence" is about 2. For hesitation
+inside one line, use an ellipsis or a dash: "I... I don't know." The cleanest separation is one
+line per shot, with the cut itself as the pause. Each pause needs about 1 more second of
+duration.
 
 **Shape.** 2 to 4 shots; default to 3 for "a scene", 2 for a short or simple idea. One flowing
 paragraph in chronological order, roughly 120 to 250 words. No numbered lists, no headings, no
@@ -77,6 +89,7 @@ are what breaks consistency. A single character, or one character plus one prop,
 
 ## Duration and settings to tell the user
 - 2 shots: 8 seconds or more. 3 shots: 10 seconds or more. 4 shots: 12 seconds or more.
+- Add about 1 second for each pause between dialogue lines.
 - Leave Enhance off for these prompts: the enhancer rewrites for a single continuous shot and can
   merge the cuts.
 
@@ -90,14 +103,15 @@ behind. Idea: she wakes the orb.
 > forward in a dim, hazy room to study a glowing glass orb held at the lower right of the frame, a
 > single warm lamp glowing softly in the dark background, drifting dust in the air. Her eyes widen
 > slightly as the orb's blue light flickers across her face, and she whispers in a thin, cracked
-> voice, "There you are." A low, ominous hum underlies the scene. A hard cut transitions to an
+> voice, "There you are." A low, ominous hum underlies the scene. Hard cut to an
 > extreme close-up of the orb itself, same dim room and same warm lamp glow blurred behind it,
 > swirling blue and amber specks moving inside the glass as her wrinkled hand hovers just beside
-> it, the same low hum continuing. The view cuts to a wide shot from behind and above of the same
+> it, the same low hum continuing. The view cuts instantly to a wide shot from behind and above of the same
 > elderly woman, same long grey-streaked light-brown hair and black knit garment, hunched over the
 > glowing orb in the center of the dark room, the single warm lamp still visible at the far wall,
 > the orb's blue light spilling across the floor as the hum swells and her thin, cracked voice
 > murmurs, "Show me."
 
 Note how shot 1 is the image, and the second and third shots repeat her hair, clothing, the lamp
-and the hum.
+and the hum. Each cut jumps scale and angle (medium close-up, extreme close-up, wide from behind and
+above), and each line of dialogue sits in its own shot.

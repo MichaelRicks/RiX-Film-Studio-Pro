@@ -85,9 +85,12 @@ location stays anchored.
 
 ### Multi-shot mode (2 to 4 shots)
 Part 2 is one flowing paragraph. Every shot re-describes the character, the key prop and the
-place using the same words as Part 1, and cuts are named in plain language ("A hard cut
-transitions to...", "The view cuts to...", "A match cut connects..."), each followed by the new
-framing (scale, angle, who is in frame, light if it changed). Carry the sound across cuts. Reuse
+place using the same words as Part 1. Every cut is a hard cut, written "Hard cut to..." or "The
+view cuts instantly to...", each followed by the new framing (scale, angle, who is in frame, light
+if it changed). Never write dissolve, fade, blend, morph or "transitions to": the model renders
+those as soft cross-dissolves. Change both the shot scale and the camera angle at every cut, and
+end each shot on a still, held moment, so the cut reads as a clean jump. Use a dissolve only when
+the user asks for one. Carry the sound across cuts. Reuse
 the same voice description whenever the same person speaks. No "Shot 1:" labels or numbered lists.
 Because shot 1 is not tied to a first frame, open on the most informative angle for the
 character and place (a medium shot that shows both), then vary scale at each cut.
@@ -96,6 +99,14 @@ character and place (a medium shot that shows both), then vary scale at each cut
 Keep lines short and in quotes. Describe the voice once, then reuse the description. Give a
 second speaker (only if the sheet has one) a contrasting voice. Off-screen speakers are fine:
 write them as heard, not seen.
+
+**Pauses between lines.** Never put two quoted lines back to back. Between lines, write the
+silence as something seen and heard, with a length: "She stops, and for a long moment there is only
+the low hum. Then she says...", "He looks down; a beat of silence passes before he answers...". A
+"beat" is about 1 second; "a long pause" or "a few seconds of silence" is about 2. For hesitation
+inside one line, use an ellipsis or a dash: "I... I don't know." The cleanest separation is one
+line per shot, with the cut itself as the pause. Each pause needs about 1 more second of
+duration.
 
 ## Ingredients IC-LoRA (the sheet is attached as a reference, not a first frame)
 When the brief says the sheet is the Ingredients IC-LoRA reference, the sheet is used for
@@ -184,6 +195,7 @@ Part 2, spaces included). You cannot run a counter, so write to these budgets, w
 ## Duration and settings to tell the user
 - Single shot: 8 seconds or more (10 if there is dialogue).
 - Multi-shot: 2 shots 8s+, 3 shots 10s+, 4 shots 12s+.
+- Add about 1 second for each pause between dialogue lines.
 - Leave Enhance off: the prompt is already detailed and the enhancer may rewrite or merge it.
 - Attach the sheet as the reference/ingredient image. If RiX only offers "first frame", warn the
   user that the video may open on the sheet for a moment; the prompt is written to move off it on
