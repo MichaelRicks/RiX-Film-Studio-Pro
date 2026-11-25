@@ -1,6 +1,6 @@
 ---
 name: rix-lens
-description: Blockbuster anamorphic look for RiX Film Studio Pro (LTX 2.5), with three selectable looks (Natural, Cinematic, Blockbuster) and a lens-flare switch. Writes still-image prompts for character sheets, anamorphic location plates and hard-light lighting plates (first frames and ingredients), and builds a compact LOOK LOCK to restate in every shot of a rix-prompt or rix-ingredients-prompt prompt. Use when the user says LENS, anamorphic, blockbuster look, cinematic look, lens flare, lighting plate, location plate, or says their videos look flat.
+description: Blockbuster anamorphic look for RiX Film Studio Pro (LTX 2.5), with four selectable looks (Natural, Cinematic, Blockbuster, Phone) and a lens-flare switch. Writes still-image prompts for character sheets, anamorphic location plates, hard-light lighting plates and ordinary phone-photo first frames (first frames and ingredients), and builds a compact LOOK LOCK to restate in every shot of a rix-prompt or rix-ingredients-prompt prompt. Use when the user says LENS, anamorphic, blockbuster look, cinematic look, lens flare, lighting plate, location plate, phone look, phone photo, real photo, found footage, looks AI, or says their videos look flat.
 ---
 
 # RiX LENS: selectable cinematic looks
@@ -24,9 +24,9 @@ user wants a different look, change the first-frame still (Stage 2), not just th
 close-up framed tighter than asked, and the wide drifted off the doorstep.
 
 ## Start every job by asking
-- The LOOK (below): Natural, Cinematic or Blockbuster, and flare on or off. If the user already said
-  ("Cinematic, no flare"), don't ask again. If they didn't, ask ONE short question with the three
-  looks and the flare default.
+- The LOOK (below): Natural, Cinematic, Blockbuster or Phone, and flare on or off (Phone has no
+  flare). If the user already said ("Cinematic, no flare"), don't ask again. If they didn't, ask ONE
+  short question with the four looks and the flare default.
 - What are we making: a character sheet prompt, a location plate, a lighting plate, or a look lock
   for a video prompt?
 - The scene: mood, time of day (night or daylight), the main light source in the world.
@@ -47,6 +47,7 @@ FLARE. The looks switch them on and off.
 | **Natural** | off | off (plain rix-prompt wording) | Dialogue, groups, comedy, documentary realism. Default for rix-prompt and rix-ingredients-prompt. |
 | **Cinematic** | on | soft version: one direction, gentle falloff, face readable | Filmic without the risk. Safe for faces. |
 | **Blockbuster** | on | hard version: hard key, rim, deep textured shadow, shadow-side line when it suits | Hero shots, night, tension, trailers. |
+| **Phone** | off (no anamorphic words at all) | plain, unflattering real-world light | Everyday realism, "looks like a real phone photo", found footage, vlogs, anything that must not look AI. |
 
 **Flare switch:** On or Off, separate from the look. Default OFF for Natural and Cinematic, ON for
 Blockbuster wides and establishing shots, and OFF in Blockbuster face close-ups (in testing the
@@ -120,6 +121,51 @@ To use a plate as a first frame, it should contain the character; generate the p
 character in it, or use the plate as an ingredient. A plate with no characters suits establishing
 shots and `rix-ingredients-prompt` Setting panels.
 
+## STAGE 2B: Phone-photo still (Phone look)
+Adapted from a Krea-2 "real photo" prompt recipe (2026-11-24; untested on LTX so far). Use it for
+the first-frame still or an ingredient image when the user wants a photo that looks 100% real and
+unedited. It works with any image model, as it is plain prose. Never mix it with the anamorphic
+words of Cinematic or Blockbuster: no 35mm film, no oval bokeh, no flare, no 2.39:1.
+
+Write ONE paragraph of 120 to 220 words, plain everyday language, the way a person describes a photo
+on a friend's phone. Output only the prompt, in a code block.
+- **How it was taken:** open with it ("A slightly tilted phone photo of...", "A quick mirror selfie
+  of...") and say who took it (the subject, a friend, someone in a hurry). Casual framing: tilted
+  horizon, off-centre subject, a little too much floor or ceiling, slightly high or low angle.
+- **Subject:** ordinary people, not models. Rough adult age, build, expression, caught mid-action
+  (talking, laughing, looking at a phone, squinting in the sun).
+- **Skin, hair, clothes:** visible pores, slight redness, forehead shine, small blemishes; messy,
+  damp or carelessly tied hair; wrinkled, faded or oversized clothes with lint or worn edges.
+- **Props and place:** everyday clutter (receipts, cables, half-empty bottles, keys, scuffed walls,
+  worn furniture). Generic descriptions, no brand names. Background people are busy with their own
+  thing.
+- **Light and colour:** realistic and usually unflattering: overhead fluorescent tubes, a dim yellow
+  bulb, hard midday sun, direct phone flash with a dark background, mismatched window and lamp
+  light. Say which way auto white balance went (too warm, too green, too blue).
+- **Capture flaws, at least three, concrete:** noise in the dark areas, slight blur, focus on the
+  wrong thing, blown highlights, crushed shadows, off white balance, haze around lights from a
+  smudged lens, flash glare, JPEG softness, wide-lens distortion up close.
+- **Text in the image:** transcribe exactly in double quotes and say if it is blurry or partly hidden.
+- **Ending:** one short sentence calling it casual, unposed and unedited.
+- **Banned words in this look** (they make images look AI): cinematic, editorial, masterpiece,
+  stunning, beautiful, gorgeous, breathtaking, ethereal, dreamy, ultra-detailed, highly detailed,
+  intricate, 8k, 4k, HDR, award-winning, professional, studio lighting, softbox, bokeh, golden hour,
+  perfect, flawless, refined, aesthetic, sharp focus, rich textures, color grading, vibrant, moody,
+  epic, dramatic lighting, rim light, hyperrealistic, photorealistic.
+
+**Video-safe rule (this is for a first frame, so it differs from a plain photo prompt):** the flaws
+carry into the clip, so choose ones that survive motion. Good: noise, off white balance, flat
+unflattering light, haze, JPEG softness, a slightly tilted frame. Avoid: the face or head cut off by
+the frame, mid-blink eyes, a hand blurred mid-motion, a finger over the lens. Keep the face and both
+hands fully in frame and sharp enough to animate. The clip's motion rules still apply (slow, simple).
+
+Template:
+A slightly tilted phone photo of [subject, rough age, build] [doing a simple thing] in [ordinary
+place], taken by [who]. [Framing quirks.] [Clothes, hair, skin with specific imperfections.]
+[Everyday clutter and background people.] [Unflattering light and the white-balance slant.]
+[Three or more video-safe capture flaws.] [Any text in quotes.] Casual, unposed and unedited, like
+it was snapped quickly and never looked at again.
+
 ## STAGE 3: Lighting plate (Blockbuster; a soft version for Cinematic)
 Video models pull every shot toward even exposure; typing "darker" only goes so far. Make light that
 can't be misread:
@@ -166,6 +212,13 @@ Every LIGHT part names: key source and direction, colour temperature, rim, shado
 bounce or fill, and what the light stays ("stays cool and low-key", "stays crisp, high-contrast
 sunlight"). Phrase the stay as a positive.
 
+**PHONE look lock** (replaces LENS, FLARE and LIGHT parts; Phone has none of those). About 20 to 30
+words, restated in the same words in every shot: "Handheld phone-video look: slightly uneven
+framing, flat [fluorescent / window / overcast] light, auto white balance a little [warm / green],
+soft phone-camera noise in the shadows, nothing staged." Describe the light as the first-frame image
+shows it. No lens, bokeh, film-grain or flare words. Keep the camera mostly still or one slow drift;
+no shake instructions, and keep hands resting (anatomy rules).
+
 **Daylight cautions:** the sun may land behind the subject if you only say "from the upper right";
 say "in front of and beside him" and "face clearly readable". Keep the flare to the wide shot.
 
@@ -203,6 +256,10 @@ Skip it for comedy beats, wides where several faces must read, daylight exterior
 - Face too dark or sun behind the subject: "in front of and beside him", "gentle bounce on the
   shadow side", "face clearly readable", or drop to Cinematic.
 - Too stylised for the scene: drop to Cinematic or Natural.
+- Phone look still comes out glossy or model-pretty: a banned word crept in, or the light is too
+  nice; name the ugly light source and add one more small imperfection.
+- Phone look clip morphs or the head cuts off: the still had a cropped head or a blurred hand; redo
+  the still with the face and both hands fully in frame (see the video-safe rule).
 - Soft or splotchy still: too many chained edits; go back to the earliest clean generation.
 - A brand or logo appears: a product name crept in; describe the look instead.
 
