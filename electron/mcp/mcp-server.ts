@@ -111,9 +111,9 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The complete prompt text, exactly as it should appear in the box' },
-        image_path: { type: 'string', description: 'Absolute path of the reference/first-frame image (optional). RiX offers to save it as the prompt\'s thumbnail and first frame.' },
-        folder: { type: 'string', description: 'Suggested Prompt Manager folder name for the save dialog, e.g. the character or project (optional)' },
-        thumbnail_only: { type: 'boolean', description: 'true when image_path is a reference SHEET: it is used as the thumbnail only and is never loaded as the first frame' },
+        image_path: { type: 'string', description: 'Absolute path of the reference/first-frame image (optional)' },
+        folder: { type: 'string', description: 'Suggested Prompt Manager folder name, prefilled if the user presses Save prompt, e.g. the character or project (optional)' },
+        thumbnail_only: { type: 'boolean', description: 'true when image_path is a reference SHEET, never a first frame' },
       },
       required: ['prompt'],
     },

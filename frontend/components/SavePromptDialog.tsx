@@ -5,10 +5,10 @@ import { pathToFileUrl } from '../lib/file-url'
 import { listPromptFolders, savePromptToLibrary } from '../lib/prompt-library-bridge'
 
 /**
- * Also opened by the "Save prompt" button in the Generate prompt bar for any prompt in the box.
- * Opens right after Claude puts a prompt in the prompt box ("Prompt with Claude"): offers to save
- * it to a Prompt Manager folder with the reference image as its thumbnail. Claude can suggest a
- * folder; the user picks an existing one or types a new name. Nothing is saved unless they press Save.
+ * Opened only by the "Save prompt" button in the Generate prompt bar, for any prompt in the box:
+ * saves it to a Prompt Manager folder with the reference image as its thumbnail. A folder Claude
+ * suggested with its last prompt is prefilled; the user picks an existing one or types a new name.
+ * Nothing is saved unless they press Save.
  */
 const NEW = '__new__'
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()

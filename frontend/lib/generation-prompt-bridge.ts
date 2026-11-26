@@ -4,7 +4,7 @@
  * renderer, which lands here. The mounted Generate screen registers a target, so
  * the prompt goes through the same undo/redo history as an Enhance result.
  */
-/** Optional hints from Claude for the "save to library?" dialog RiX opens after the prompt lands. */
+/** Optional hints from Claude. `folder` prefills the dialog if the user presses "Save prompt". */
 export interface GenerationPromptMeta { imagePath?: string; folder?: string; thumbnailOnly?: boolean }
 type PromptTarget = (prompt: string, meta: GenerationPromptMeta) => void
 

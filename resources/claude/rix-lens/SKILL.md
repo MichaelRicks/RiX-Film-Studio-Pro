@@ -233,7 +233,7 @@ Skip it for comedy beats, wides where several faces must read, daylight exterior
   lighting and framing words of shot 1 (matching what the image shows) and repeat the same LENS,
   LIGHT (and FLARE) words at each cut, after the subject re-description. Hard cuts only, no
   dissolves.
-- `rix-ingredients-prompt`: put the lock in Part 2 only, never Part 1 (Part 1 describes the sheet).
+- `rix-ingredients-prompt`: put the lock in the `Generated video:` part only, never `Reference sheet:`, and keep it to one short sentence.
 - Respect the anatomy and motion rules. Keep hands resting; slow, simple motion still applies.
 - Busy scene, many cuts: fewer lock words per shot (the LIGHT part plus "anamorphic film look").
   A two-hander or single master shot can carry the full lock.

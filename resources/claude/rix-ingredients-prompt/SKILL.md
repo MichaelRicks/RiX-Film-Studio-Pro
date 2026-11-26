@@ -14,8 +14,8 @@ Tools: `inspect_media` (look at the sheet) and `set_generation_prompt` (fill the
 Don't call `rix_status`: there is no project or timeline to check here.
 
 ## Inputs
-- Sheet image path, the user's idea (may be empty), mode: **single** (default) or **multi** with a
-  shot count (2 to 4, default 3), and whether to include dialogue.
+- Sheet image path, the user's idea (may be empty), mode: **single** (default) or **multi** (only
+  when the user or the brief asks for 2 or more shots), and whether to include dialogue.
 
 ## Steps
 1. `inspect_media` the sheet with `frames: 1` and a width of 1280 or more, so small panels and
@@ -23,137 +23,138 @@ Don't call `rix_status`: there is no project or timeline to check here.
 2. Map the panels: for each one, note its position (Top Row Left, Middle Row Right, Bottom Row,
    Left Column...) and whether it is a Character, Outfit, Prop, or Setting. Read any printed notes
    (wardrobe, age, personality) and use them as extra detail. Count every panel, small ones at the
-   edges and in the bottom row included, and give EACH its own entry in Part 1; skipping one means
-   the video never sees it. A small tile that shows a garment (a clothing sheet, a flat-lay, a
+   edges and in the bottom row included, and give EACH its own entry under `Reference sheet:`;
+   skipping one means the video never sees it. A small tile that shows a garment (a clothing sheet, a flat-lay, a
    figure in a different outfit) is an **Outfit** panel and normally wins over the clothing worn in
    the big character photo. If the outfit tile is too small to read, inspect the sheet again at
    width 1920 and describe what you can see: colour, material, cut, trim, pattern.
-3. Write the prompt in the two-part format below.
+3. Do the panel check below, then write the prompt in the two-part format.
 4. Call `set_generation_prompt` with the prompt text only, plus `image_path` (the sheet's absolute
    path), `thumbnail_only: true` (the sheet is never a first frame) and `folder` (a suggestion: the
    character or project name, or "Reference Sheets").
-5. Reply in a few lines: panels found, shot count, the duration to set, and anything you guessed
-   or left out (unreadable text, odd hands, a panel that was unclear). Do not generate anything.
+5. Reply in a few lines: panels found, shot count, the duration to set, **any panel the idea needs
+   that the sheet lacks** (say what to add), and anything you guessed or left out (unreadable text,
+   odd hands, a panel that was unclear). Do not generate anything.
 
 If the tool says the Generate screen isn't open, give the prompt in a code block instead.
 
 ## Saving it
-RiX opens its own "Save this prompt?" dialog as soon as `set_generation_prompt` lands, with your suggested
-folder preselected and the sheet as the thumbnail. So do NOT ask about saving in chat and do not call
-`save_prompt` unless the user asks you to. If they ask for changes, revise and call
-`set_generation_prompt` again. End your reply by saying the save dialog is waiting in RiX.
+Nothing is saved automatically. The user saves prompts worth keeping with the **Save prompt** button
+under RiX's prompt box (your suggested folder is prefilled there). So do NOT ask about saving, do not
+mention a save dialog, and do not call `save_prompt` unless the user asks you to. If they ask for
+changes, revise and call `set_generation_prompt` again.
 
-## Format (always both parts, in this order, plain text)
+## The five model-card rules (these win over everything else here)
+1. **Two labelled parts, no trigger word:** `Reference sheet: {panels}.` then
+   `Generated video: {action}.`
+2. **Only what is on the sheet gets seen.** The model won't invent an identity. Every character,
+   creature, hand-held prop, vehicle and location that appears on screen needs its own panel.
+3. **The model was trained on 121 frames at 24 fps, about 5 seconds**, on a wide 768x448 frame.
+   Write what fits in that.
+4. LoRA strength is about 1.4 (RiX's default for Ingredients).
+5. The card's negative prompt (worst quality, inconsistent motion, blurry, jittery, distorted) is a
+   separate input, not prompt text. RiX's Ingredients mode has no box for it. **Never write those
+   words, or any "no ..." list, into the prompt:** naming a fault can produce it.
 
-**Part 1: `### Reference Sheet Description`**
-One entry per panel group, each starting with its position and role in bold, for example
-`**Top Row Left (Character):**`, `**Top Row Right (Prop):**`, `**Bottom Row (Setting):**`.
-Describe what is actually there, concretely: for a character, age, hair, skin, build, face, each
-garment with colour and material, shoes, accessories, and the views shown (front, side, back); for
-a prop, shape, colour, material, parts, views; for a setting, layout, furniture, materials, plants,
-colours, and every light source with its colour and position. No story here, only description.
+## Panel check (before writing; this is where generations fail)
+List every person, creature, prop, vehicle and place the idea would put on screen, and match each
+to a panel. For anything with no panel:
+- **A second person** (bartender, enemy, crowd): keep them off-screen. They may be heard, or looked
+  at ("she aims at someone beyond the right edge of the frame"), but they are never seen: no
+  shoulder in the foreground, no distant figure, no hit or falling body.
+- **A prop** (beer mug, gun, phone): cut it and the action that needs it, or use a prop that has a
+  panel.
+- **A location** (a church, a saloon, when the setting panel shows a garage): set the scene in the
+  sheet's setting instead. Never describe a place that has no panel.
+- If the idea cannot work without the missing thing, still write the closest version that uses only
+  the sheet, and open your reply by saying what is missing and that the sheet needs a panel for it.
+Incidental surfaces that belong to the setting panel (its walls, floor, sky, furniture) are fine.
+A sheet with no setting panel has no location to render: say so in your reply and keep the
+background plain and softly blurred.
 
-**Part 2: `### Target Description`**
-The scene. Reuse the exact wording from Part 1 for every identifying detail (hair, each garment,
-prop, set pieces, light sources), so each can be traced to a panel. Include the camera, the
-action, the expression changes, the light on the subject and the sound. Use only elements that
-exist on the sheet unless the user's idea requires more. Never add new characters. Never mention
-panels, rows or the sheet inside Part 2.
+## Format (exactly two parts, plain text)
+Two paragraphs separated by one blank line, each starting with its label. No headings, bold,
+bullets, markdown, caps trigger word or preamble. Nothing before `Reference sheet:` and nothing
+after the action.
+
+**`Reference sheet:`** what each panel shows, one clause or short sentence per panel, separated by
+semicolons. Characters first, then outfits and props, then the setting. Name the role in plain
+words ("the same woman's face in close-up", "a heavy black pistol shown from the side"). For a
+character: age, hair, skin, build, face, each garment with colour and material, shoes, accessories
+and the views shown. For a prop: shape, colour, material. For a setting: layout, materials, colours
+and light. Only what is visibly there; no story. Do not mention grids, positions, borders, labels
+or layout.
+
+**`Generated video:`** one flowing paragraph. Open with the visual style (match the sheet:
+live-action stays live-action, 3D stays 3D), full-frame, then the place and framing, then the
+character already inside that place doing something: "Generated video: a full-frame live-action
+cinematic scene on the quiet street outside the red brick garage, ...". Then the camera, the
+action, the light, and the sound. Reuse the exact wording from `Reference sheet:` for every
+identifying detail (hair, each garment, prop, set pieces, light), so each traces to a panel. Never
+mention the sheet or panels here.
+
+### Sign text (copy it exactly)
+Without the words, the model makes up gibberish for a sign. For every large, readable sign,
+lettering or print that belongs to the thing in a panel (a storefront sign, a name on a vehicle,
+wording on a shirt or prop):
+- Quote the exact words in double quotes, with their spelling and punctuation, in **both** parts:
+  `a pale storefront sign reading "JOE'S GARAGE" in faded blue lettering`. Repeat the quote in every
+  shot where the sign is in view.
+- Read it from the image. If you can't make it out, inspect again at width 1920. If it is still
+  unreadable, leave the words out, never guess, and say so in your reply.
+- Quote only the main lettering; skip tiny engravings and small posters.
+- The sheet's own panel labels, captions and printed notes ("CHARACTER", "PROP", "LOCATION") are
+  not sign text: never put them in the prompt.
 
 ### Keep the sheet out of the video (applies to both modes)
-The video model may be conditioned on the sheet image and will copy its layout unless the text
-pulls it away. So Part 2 must read as a brand-new live-action scene, not as an animation of the
-sheet:
-- Open Part 2 with a positive full-frame statement that names the place and the framing, for
-  example "A single full-frame, live-action cinematic scene inside a dimly lit bedroom at night,
-  filmed as one unbroken view." Never open with the character alone against a blank background.
-- Put the character already inside the setting from the first words, doing something. No posing,
-  no turning to show outfit angles, no standing in a line, no neutral studio look.
-- Give a physical action in the first beat (sitting down, reaching, walking in, picking up the
-  prop), so the picture changes right away.
-- Use the setting panel's light and background as the whole frame, edge to edge. Part 2 describes
-  one camera view at a time and one scene only; never split-screen, collage, grid or inset views.
-- Part 1 starts with one plain line before the panel entries: "The sheet below is layout only.
-  Its labels, borders and repeated views are not part of the scene." Then the panel entries.
+- Put the character in the setting from the first words. No posing, turning to show the outfit,
+  standing in a line or neutral studio look.
+- Give a small physical action in the first moment, so the picture changes right away.
+- The setting's light and background fill the whole frame, edge to edge. One camera view at a time;
+  never split-screen, collage, grid or inset views.
 
-### Single-shot mode
-Part 2 is one continuous shot, one paragraph, about 150 to 250 words. State the camera once
-("The camera holds a steady, static medium shot", or a slow push-in or pan) and keep it. Give the
-action as a sequence of beats with a clear emotional turn. Dialogue: short quoted lines with the
-voice described once. Describe the ambient sound. Finish with the background and light so the
-location stays anchored.
+### Single-shot mode (the default)
+One continuous shot, about 80 to 150 words. State the camera once ("The camera holds a steady,
+static medium shot", or one slow push-in) and keep it. One main action with at most one change of
+expression, small enough to finish in 5 seconds. At most one short spoken line (about 8 words or
+fewer). Describe the ambient sound. End on a still, held moment.
 
-### Multi-shot mode (2 to 4 shots)
-Part 2 is one flowing paragraph. Every shot re-describes the character, the key prop and the
-place using the same words as Part 1. Every cut is a hard cut, written "Hard cut to..." or "The
-view cuts instantly to...", each followed by the new framing (scale, angle, who is in frame, light
-if it changed). Never write dissolve, fade, blend, morph or "transitions to": the model renders
-those as soft cross-dissolves. Change both the shot scale and the camera angle at every cut, and
-end each shot on a still, held moment, so the cut reads as a clean jump. Use a dissolve only when
-the user asks for one. Carry the sound across cuts. Reuse
-the same voice description whenever the same person speaks. No "Shot 1:" labels or numbered lists.
-Because shot 1 is not tied to a first frame, open on the most informative angle for the
-character and place (a medium shot that shows both), then vary scale at each cut.
+### Multi-shot mode (only when asked for)
+Cuts are a risk with this LoRA: it learned 5-second clips. Use **2 shots** at 6 seconds, with very
+small actions. Write 3 or 4 only when the brief insists, and warn in your reply that shots may be
+dropped or smeared. `Generated video:` stays one paragraph. Each shot
+repeats the character, key prop and place in one short clause using the same words. Every cut is a
+hard cut, written "Hard cut to..." followed by the new framing (scale, angle, who is in frame).
+Never write dissolve, fade, blend, morph or "transitions to". Change both shot scale and camera
+angle at each cut, and end each shot on a still, held moment. No "Shot 1:" labels. Open on a medium
+shot that shows both character and place.
 
 ## Dialogue
-Keep lines short and in quotes. Describe the voice once, then reuse the description. Give a
-second speaker (only if the sheet has one) a contrasting voice. Off-screen speakers are fine:
-write them as heard, not seen.
-
-**Pauses between lines.** Never put two quoted lines back to back. Between lines, write the
-silence as something seen and heard, with a length: "She stops, and for a long moment there is only
-the low hum. Then she says...", "He looks down; a beat of silence passes before he answers...". A
-"beat" is about 1 second; "a long pause" or "a few seconds of silence" is about 2. For hesitation
-inside one line, use an ellipsis or a dash: "I... I don't know." The cleanest separation is one
-line per shot, with the cut itself as the pause. Each pause needs about 1 more second of
+Keep lines short and in quotes. Describe the voice once, then reuse the description. An off-screen
+speaker is heard, never seen. In a 5-second clip use one line at most. Never put two quoted lines
+back to back: between lines, write the silence as something seen and heard ("a beat of silence
+passes" is about 1 second, "a long pause" about 2). Each pause needs about 1 more second of
 duration.
 
 ## Ingredients IC-LoRA (the sheet is attached as a reference, not a first frame)
 When the brief says the sheet is the Ingredients IC-LoRA reference, the sheet is used for
 appearance only. The video must be a different picture from it:
-- Treat every panel as a source of identity, never as a layout. The sheet may mix character,
-  outfit, location and prop panels; pull from each only what the scene needs, and use only the
-  panels the idea calls for (a location panel can be ignored if the idea sets the scene elsewhere).
-- Describe what each panel shows (Part 1) so the model can match it, then put it to work in Part 2
-  with the same words. Use the single plain opening line from the Format section for Part 1 and do
-  not add more talk about layout, borders or panels: naming them can prime the video to show them.
-- Open Part 2 with the full-frame statement, the place, the framing and a first-beat action, as in
-  the rules above. Never start on a pose that matches a sheet panel (no front/side/back turnaround
-  stance, no neutral standing).
-- Keep the camera, scene and action entirely from the user's idea. The sheet supplies who and what,
-  not where the camera is or what happens.
-- Keep the wording of each identifying detail identical between Part 1 and Part 2 and across every
-  shot, because the LoRA binds the text to the sheet's appearance.
+- Treat every panel as a source of identity, never as a layout. Use only the panels the idea calls
+  for, but describe every panel under `Reference sheet:`.
+- The user's idea decides the camera and the action. The sheet decides who, what and where: the
+  panel check above limits what the idea can show.
+- Never start on a pose that matches a sheet panel (turnaround stance, neutral standing).
+- Keep each identifying detail worded identically in both parts and across every shot.
 - **Outfit changes (the sheet shows the character in one outfit and an outfit panel shows another).**
-  The model copies whatever clothing sits next to the face, so the prompt must say which wins.
-  In Part 1, describe the character panel by face, hair and build only, and say plainly that the
-  clothing, veil, scarf or other headwear in that panel is not used in the scene ("her clothing in
-  this panel is not worn"). Describe the outfit panel as the garment she wears, by colour,
-  material and trim. In Part 2 state it at the first mention and again in every shot ("wearing the
-  navy brocade qipao, bare-headed, no veil"), and name any headwear or accessory from the character
-  photo that must NOT appear. Say it positively: she wears X.
-  If the outfit tile shows a person (a model or figure wearing the garment), her face, hair, skin
-  and body are NOT used: say so in Part 1 ("the figure's face and hair in this panel are not used,
-  only the garment"), because the model otherwise swaps the face. The face always comes from the
-  Character panel.
-- If the sheet carries several outfits or locations, name the one in use ("the black leather vest
-  and denim outfit") so it is not blended with the others.
-
-### What the official Ingredients example does (copy these habits)
-The LTX model card's own sample sheet has a character in front, side and back views, a controller
-shown from three angles, a t-shirt, and a wide bedroom. Its prompt shows:
-- Panel entries are named by where they really are on the sheet, in a grid vocabulary: Top Row
-  Left, Top Row Right, Middle Row Right, Bottom Row, each with a role in brackets: (Character),
-  (Prop), (Setting). Name each panel by its actual position, one entry per panel or panel group.
-- A prop panel can become clothing in the scene. The t-shirt sits on the sheet as a Prop, and in the
-  target the woman wears it. Say so plainly ("She wears the dark olive short-sleeved t-shirt...").
-- The sheet's views (front, side, back) are described in Part 1 as views, then Part 2 uses the
-  person once, in one action, never as a turnaround.
-- Part 2 opens on the place, then the camera ("The camera holds a steady, static medium shot"),
-  then the character already doing something, then the light on her face, then expression beats
-  with short pauses ("She pauses for a split second..."), dialogue in quotes, and ends by naming
-  the softly blurred background. One flowing paragraph, no lists.
-- Part 1 stays pure description of the sheet; every detail is worded again, identically, in Part 2.
+  The model copies whatever clothing sits next to the face, so the prompt must say which wins. Under
+  `Reference sheet:` describe the character panel by face, hair and build, and the outfit panel as
+  the garment worn in the scene, by colour, material and trim. In `Generated video:` say positively
+  that the character wears it, at the first mention and in every shot, with the head as it should
+  look ("bare-headed, long black hair loose"). If the outfit panel shows a figure or model, say only
+  the garment is taken from it, and that the face is the one from the character panel.
+- If the sheet carries several outfits or locations, name the one in use so it is not blended with
+  the others.
+- A prop panel can become clothing: "She wears the dark olive short-sleeved t-shirt...".
 
 ## Anatomy and motion (prevents warped limbs and twisting)
 The user has seen malformed, twisting bodies and limbs. Use positive wording only:
@@ -166,36 +167,34 @@ The user has seen malformed, twisting bodies and limbs. Use positive wording onl
   out of frame over gesturing or crossing.
 - Prefer close-ups of the face and still wide shots over mid-action full-body shots. Avoid crossed
   or tangled limbs, bodies twisting away from the camera, and overlapping people.
-- Keep armor, props and any crowd still ("the fallen warriors lie motionless").
+- **Fights and gunplay smear this model badly.** "A gunfight" becomes one held pose: she stands or
+  kneels braced, aims, fires once, holds. No running, diving, rolling, ducking, explosions, flying
+  debris, shattering glass or a moving camera. Return fire is heard, not shown. Tell the user you
+  toned the action down and why.
 
 ## Length limit (hard)
 The LTX API rejects any prompt over 5000 characters, and RiX falls back to it whenever the local text
-encoder isn't downloaded. RiX's `set_generation_prompt` also refuses anything over 5000 characters and
-tells you so; if that happens, shorten and call it again. Aim for 4000 to 4500 in total (Part 1 plus
-Part 2, spaces included). You cannot run a counter, so write to these budgets, which already add up:
-- **Part 1** (Reference Sheet Description): about 1200 characters, roughly 180 words. One to three
-  short sentences per panel. Keep identifying detail (hair, each garment with colour and material,
-  prop shape, light sources); drop everything else and any panel the scene doesn't use.
-- **Part 2, single shot:** about 1400 to 1600 characters (150 to 250 words, the range above).
-- **Part 2, multi-shot:** about 2800 characters in all: 2 shots up to 1400 each, 3 shots about 950
-  each, 4 shots about 700 each. Re-describe the character in each shot in one short clause using
-  the Part 1 words, not a full paragraph.
-- Dialogue and the look lock count too. If a look lock or dialogue pushes it over, shorten the shot
-  descriptions, not the lock words.
-- Before calling the tool, estimate: about 6 characters per word including the space. Over 700
-  words is too long. Say the rough length in your reply.
+encoder isn't downloaded. RiX's `set_generation_prompt` also refuses anything over 5000 characters.
+Longer is not better here. Aim for:
+- `Reference sheet:` 400 to 900 characters.
+- `Generated video:` 500 to 900 characters for a single shot, up to 1800 for 2 shots.
+- Whole prompt under 2800 characters (under 4000 if the user insisted on 3 or 4 shots).
+A look lock and dialogue count too; shorten the shot descriptions to make room, and keep any look
+lock to one short sentence. Say the rough length in your reply.
 
 ## Style rules
-- Concrete and literal: what the camera sees and what is heard. No poetic filler, no negative
-  prompts, no headings other than the two above, no markdown beyond the bold panel labels.
+- Concrete and literal: what the camera sees and what is heard. No poetic filler.
+- Positive wording only: describe what is there.
 - Do not invent dimensions, brand names or text that is not on the sheet.
 - Keep one consistent lighting story that matches the setting panel.
-- Don't add new characters unless asked.
+- Never add a character, prop or place that has no panel, even if the idea asks for it.
 
 ## Character LoRA (when the brief names one)
+(The "no trigger word" rule above is about the Ingredients LoRA; a character LoRA's own trigger
+word is still used.)
 A character LoRA draws one specific person. Claude can't see inside it, so the brief gives a trigger
 word, a description and sometimes a photo. That character IS the main character: never invent a
-different person, and add no other main character unless the user's idea asks for one.
+different person, and add no other on-screen character without a panel.
 - Write the trigger word as the character's name at their first mention in every shot, exactly as
   given ("storm01, a woman in her early thirties..."), never with @ or quotes around it.
 - Describe the character with the brief's words (or what the photo shows), the same words in every
@@ -206,37 +205,34 @@ different person, and add no other main character unless the user's idea asks fo
   person from the LoRA's character, say so in your reply.
 
 ## Duration and settings to tell the user
-- Single shot: 8 seconds or more (10 if there is dialogue).
-- Multi-shot: 2 shots 8s+, 3 shots 10s+, 4 shots 12s+.
-- Add about 1 second for each pause between dialogue lines.
-- Leave Enhance off: the prompt is already detailed and the enhancer may rewrite or merge it.
-- Attach the sheet as the reference/ingredient image. If RiX only offers "first frame", warn the
-  user that the video may open on the sheet for a moment; the prompt is written to move off it on
-  the first beat, and the fallback is to crop the best character view and use that as the first
-  frame.
+- Single shot: 5 seconds (the trained length and RiX's default). 6 if a spoken line needs room.
+- 2 shots: 6 seconds.
+- Don't recommend more than 6 seconds: 8 and longer can fail on local hardware. Use a longer length
+  only when the brief sets it, and say it may fail. A brief that sets the length wins.
+- LoRA strength 1.4. Use a wide sheet: RiX takes the video's shape from the sheet image, so a tall
+  sheet makes a tall video. Say so if the sheet is not landscape.
+- Bigger, cleaner panels hold identity better. If the face panel is small or a needed panel is
+  missing, say so.
+- Leave Enhance off: the enhancer may rewrite or merge the two parts.
 
-## Worked example (single shot)
-Sheet: young woman character views, a black game controller, an olive graphic t-shirt, a dim
-wood-and-plants bedroom with a glowing circular wall light.
+## Worked example (single shot, 5 seconds)
+Sheet: a young woman in several views, a black game controller, an olive graphic t-shirt, a dim
+wood-and-plants bedroom with a glowing circular wall light. Idea: "she wins a game against her
+brother". There is no panel for the brother, so he stays off-screen and unseen.
 
-> ### Reference Sheet Description
-> The sheet below is layout only. Its labels, borders and repeated views are not part of the scene.
-> **Top Row Left (Character):** A young woman with long, slightly wavy brown hair parted down the
-> middle, warm complexion, wearing a dark olive ribbed tank top and dark, baggy cargo pants with
-> large side pockets, shown from front, side and back. **Top Row Right (Prop):** A sleek, modern
-> black video game controller with two joysticks, a D-pad and action buttons, shown from several
-> angles. **Middle Row Right (Prop):** A dark olive short-sleeved t-shirt with a retro print of an
-> orange sun setting behind dark pine silhouettes. **Bottom Row (Setting):** A dimly lit bedroom at
-> night with wood-paneled accents, a neatly made low bed with green bedding, string lights, a
-> gaming desk with dual monitors, and a circular wall light with a warm yellow-orange ring above
-> the bed.
-> ### Target Description
-> A single full-frame, live-action cinematic scene inside a dimly lit bedroom at night with
-> wood-paneled accents, filmed as one unbroken view. The camera holds a steady, static medium shot. A young woman with long, slightly wavy brown hair
-> parted down the middle and a warm complexion sits on the edge of her neatly made low bed with
-> green bedding, gripping the sleek, modern black video game controller in both hands, thumbs
-> moving on the joysticks. She wears the dark olive short-sleeved t-shirt with the retro orange
-> sun and pine print, with dark, baggy cargo pants. The circular wall light casts a warm
-> yellow-orange glow across her face. Her expression is intense focus, then a triumphant smile as
-> she laughs and says to someone off-screen, in a smug, playful voice, "Not today!" The dual
-> monitors on the desk behind her stay softly blurred.
+> Reference sheet: a young woman with long, slightly wavy brown hair parted down the middle and a
+> warm complexion, in dark, baggy cargo pants with large side pockets, shown from front, side and
+> back; a sleek black video game controller with two joysticks, shown from several angles; a dark
+> olive short-sleeved t-shirt with a retro print of an orange sun behind dark pine silhouettes; a
+> dimly lit bedroom at night with wood-paneled walls, a low bed with green bedding, a desk with two
+> monitors and a circular wall light with a warm yellow-orange ring.
+>
+> Generated video: a full-frame live-action cinematic scene in the dimly lit bedroom at night with
+> wood-paneled walls. The camera holds a steady, static medium shot. The young woman with long,
+> slightly wavy brown hair, wearing the dark olive short-sleeved t-shirt with the retro orange sun
+> print and dark, baggy cargo pants, sits on the low bed with green bedding, both hands holding the
+> sleek black video game controller, thumbs moving on the joysticks. The circular wall light casts a
+> warm yellow-orange glow across her face. Her focused expression breaks into a triumphant smile and
+> she says toward someone beyond the frame, in a smug, playful voice, "Not today!" Natural human
+> proportions, two arms and two legs, fingers naturally shaped, smooth natural movement. Soft game
+> sounds and a quiet room tone. She holds the smile, still.

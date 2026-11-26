@@ -78,6 +78,7 @@ function characterLines(brief: PromptBrief): string[] {
 }
 
 const LENGTHS = [5, 6, 8, 10] as const
+const DEFAULT_SECONDS = 5
 /** Most shots that still read at a given length (about 2.5 s or more per shot). */
 function maxShotsFor(seconds: number | null): ShotCount {
   if (seconds == null) return 4
@@ -90,8 +91,8 @@ function lengthLines(brief: PromptBrief): string[] {
   const s = brief.seconds
   if (s == null) return []
   return brief.mode === 'revise'
-    ? [`Length: make it a ${s}-second clip (a quick test render). Fit the prompt to ${s} seconds: cut or merge shots and trim actions so everything finishes in time, at most ${maxShotsFor(s)} shots. This overrides keeping the shot count. Tell me to set the duration to ${s} s.`]
-    : [`Length: ${s} seconds total (a quick test render). Fit every shot into ${s} seconds, about ${(s / Math.min(brief.shots, maxShotsFor(s))).toFixed(1)} s per shot, with actions small enough to finish in that time. Tell me to set the duration to ${s} s.`]
+    ? [`Length: make it a ${s}-second clip. Fit the prompt to ${s} seconds: cut or merge shots and trim actions so everything finishes in time, at most ${maxShotsFor(s)} shots. This overrides keeping the shot count. Tell me to set the duration to ${s} s.`]
+    : [`Length: ${s} seconds total. Fit every shot into ${s} seconds, about ${(s / Math.min(brief.shots, maxShotsFor(s))).toFixed(1)} s per shot, with actions small enough to finish in that time. Tell me to set the duration to ${s} s.`]
 }
 
 /** Plain words for the flare slider, so rix-lens knows how strong to make it. */
@@ -127,7 +128,7 @@ function lookLines(brief: PromptBrief, sheet: boolean): string[] {
 function buildReviseBrief(brief: PromptBrief): string {
   const sheet = brief.imageKind === 'sheet' && !!brief.imagePath
   return [
-    'Revise the existing RiX video prompt below. Follow the rix-prompt skill\'s recipe (or rix-ingredients-prompt\'s two-part format if the prompt below is in that format). Change ONLY what I ask for. Keep every other word, shot, line of dialogue and detail exactly as written, and keep the shot count unless I ask otherwise. Then put the COMPLETE revised prompt in RiX\'s prompt box with set_generation_prompt.',
+    'Revise the existing RiX video prompt below. Follow the rix-prompt skill\'s recipe (or, for a reference-sheet prompt, rix-ingredients-prompt\'s "Reference sheet: ... Generated video: ..." format and its panel check, converting an older two-heading prompt to it). Change ONLY what I ask for. Keep every other word, shot, line of dialogue and detail exactly as written, and keep the shot count unless I ask otherwise. Then put the COMPLETE revised prompt in RiX\'s prompt box with set_generation_prompt.',
     '',
     'Current prompt:',
     brief.existingPrompt.trim(),
@@ -154,18 +155,18 @@ export function buildPromptBrief(brief: PromptBrief): string {
   const sheet = brief.imageKind === 'sheet' && !!brief.imagePath
   const lines = [
     sheet
-      ? 'Write a multi-shot video prompt for RiX with the rix-ingredients-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.'
+      ? 'Write a video prompt for RiX with the rix-ingredients-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.'
       : 'Write a multi-shot video prompt for RiX with the rix-prompt skill, then put it in RiX\'s prompt box with set_generation_prompt.',
     '',
     brief.imagePath
       ? sheet
         ? brief.ingredients
           ? `Reference sheet (look at it with inspect_media, width 1280 or more): ${brief.imagePath}
-It is attached to the Ingredients IC-LoRA as an appearance reference ONLY. Follow the "Ingredients IC-LoRA" section of the skill. The sheet may mix character, outfit, location and prop panels: take from each only what my idea needs. The video is a NEW scene: never show, copy or animate the sheet, its layout, borders, labels or its poses.`
+It is attached to the Ingredients IC-LoRA as an appearance reference ONLY. Follow the "Ingredients IC-LoRA" section of the skill. Use the exact two-part format "Reference sheet: ... Generated video: ..." and do the panel check: show nothing on screen that has no panel, and tell me what panel is missing. The sheet may mix character, outfit, location and prop panels: take from each only what my idea needs. The video is a NEW scene: never show, copy or animate the sheet, its layout, borders, labels or its poses.`
           : `Reference sheet (look at it with inspect_media). It is an ingredient only: the video is a NEW scene that borrows the character, props and place from it. Never show or animate the sheet or its panels: ${brief.imagePath}`
         : `Reference image (it becomes the first frame; look at it with inspect_media): ${brief.imagePath}`
       : 'Reference image: none. Write the prompt from the idea alone.',
-    `Idea: ${brief.idea.trim() || (sheet ? '(none given: invent a fitting location and a simple scene for this character)' : '(none given: pick a simple, fitting scene from the image)')}`,
+    `Idea: ${brief.idea.trim() || (sheet ? '(none given: write one simple, quiet action for this character in the sheet\'s own setting, using only what is on the sheet)' : '(none given: pick a simple, fitting scene from the image)')}`,
     brief.shots === 1
       ? 'Shots: 1. Use the SINGLE-shot mode of rix-ingredients-prompt: one continuous shot, one camera, no cuts.'
       : `Shots: ${brief.shots}`,
@@ -224,8 +225,10 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
   const [brief, setBrief] = useState<PromptBrief>({
     mode: existingPrompt.trim() ? 'revise' : 'new', change: '',
     resultVideoPath: lastVideoPath ?? null, lookAtResult: !!lastVideoPath,
-    imagePath, imageKind: ingredients ? 'sheet' : 'first-frame', ingredients, idea: '', shots: 3, dialogue: true,
-    look: existingPrompt.trim() ? 'keep' : 'natural', flare: 0, existingPrompt, seconds: null, imageRemoved: false,
+    imagePath, imageKind: ingredients ? 'sheet' : 'first-frame', ingredients, idea: '', shots: ingredients ? 1 : 2, dialogue: true,
+    look: existingPrompt.trim() ? 'keep' : 'natural', flare: 0, existingPrompt,
+    // A new prompt starts at 5 seconds; a revision keeps the current length.
+    seconds: existingPrompt.trim() ? null : DEFAULT_SECONDS, imageRemoved: false,
     characterLoras: (loras ?? []).map(l => ({ ...l, ...getLoraCard(l.ref) })),
   })
   const set = <K extends keyof PromptBrief>(k: K, v: PromptBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
@@ -321,8 +324,16 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
     if (v != null) onPickSeconds?.(v)
   }
   const needsChange = revise && !brief.change.trim()
-  const setMode = (m: 'new' | 'revise') => setBrief(b => ({ ...b, mode: m, look: m === 'revise' ? 'keep' : (b.look === 'keep' ? 'natural' : b.look) }))
-  const writeHere = () => { void startRun(prompt) }
+  const setMode = (m: 'new' | 'revise') => setBrief(b => {
+    const seconds = m === 'revise' ? null : DEFAULT_SECONDS
+    return {
+      ...b, mode: m, seconds, shots: Math.min(b.shots, maxShotsFor(seconds)) as ShotCount,
+      look: m === 'revise' ? 'keep' : (b.look === 'keep' ? 'natural' : b.look),
+    }
+  })
+  // The default length is never clicked, so set RiX's Duration when the run starts too.
+  const applySeconds = () => { if (brief.seconds != null) onPickSeconds?.(brief.seconds) }
+  const writeHere = () => { applySeconds(); void startRun(prompt) }
   const sendFollowUp = () => {
     const t = followUp.trim()
     if (!t || !run?.sessionId) return
@@ -337,6 +348,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
   const openInClaude = async () => {
     setOpening(true)
     setError(null)
+    applySeconds()
     try {
       const r = await window.electronAPI.openClaudeCode({ prompt })
       if (!r.success) { setError(r.error); return }
@@ -481,7 +493,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
               {brief.imagePath && !ingredients && (
                 <div className="flex gap-2">
                   {([['first-frame', 'First frame'], ['sheet', 'Reference sheet (Ingredients)']] as [ImageKind, string][]).map(([k, label]) => (
-                    <button key={k} onClick={() => set('imageKind', k)}
+                    <button key={k} onClick={() => setBrief(b => ({ ...b, imageKind: k, shots: k === 'sheet' ? 1 : (b.shots === 1 ? 2 : b.shots) }))}
                       className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
                         brief.imageKind === k ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
                       }`}
@@ -566,9 +578,14 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
                   className={`flex-1 py-2 rounded-lg text-sm border transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                     brief.shots === n ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent)/0.15)] text-white' : 'border-zinc-700 text-zinc-400 hover:text-white'
                   }`}
-                >{n === 1 ? 'Single' : n}</button>
+                >{n === 1 ? 'Single shot' : n}</button>
               ))}
             </div>
+            {sheetKind && (
+              <p className={`mt-1.5 text-[11px] leading-relaxed ${brief.shots > 1 ? 'text-amber-300' : 'text-zinc-500'}`}>
+                Multi-shot does not work well with the Ingredients IC-LoRA. Single shot is recommended.
+              </p>
+            )}
           </div>
 
           </>)}
@@ -587,7 +604,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
             <p className="mt-1.5 text-[11px] text-zinc-500 leading-relaxed">
               {brief.seconds == null
                 ? (revise ? 'Keep the current length.' : 'Claude picks the length.')
-                : `Claude fits the prompt into ${brief.seconds} seconds and RiX's Duration is set to match. Short clips at 720p render fast for testing whether a shot works.`}
+                : `Claude fits the prompt into ${brief.seconds} seconds and RiX's Duration is set to match.`}
             </p>
           </div>
 

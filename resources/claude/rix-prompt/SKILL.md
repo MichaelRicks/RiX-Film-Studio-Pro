@@ -23,11 +23,10 @@ timeline to check here.
 If the tool says the Generate screen isn't open, give the user the prompt in a code block instead.
 
 ## Saving it
-RiX opens its own "Save this prompt?" dialog as soon as `set_generation_prompt` lands, with your suggested
-folder preselected; the reference image becomes the thumbnail, and Inject later loads it as the
-first frame again. So do NOT ask about saving in chat and do not call `save_prompt` unless the user
-asks you to. If they ask for changes, revise and call `set_generation_prompt` again (the dialog
-reopens for the new version). End your reply by saying the save dialog is waiting in RiX.
+Nothing is saved automatically. The user saves prompts worth keeping with the **Save prompt** button
+under RiX's prompt box (your suggested folder is prefilled there). So do NOT ask about saving, do not
+mention a save dialog, and do not call `save_prompt` unless the user asks you to. If they ask for
+changes, revise and call `set_generation_prompt` again.
 
 ## The recipe (this is what makes the cuts hold together)
 **Shot 1 describes the image exactly as it is.** The image becomes the first frame, so the first
@@ -63,7 +62,7 @@ inside one line, use an ellipsis or a dash: "I... I don't know." The cleanest se
 line per shot, with the cut itself as the pause. Each pause needs about 1 more second of
 duration.
 
-**Shape.** 2 to 4 shots; default to 3 for "a scene", 2 for a short or simple idea. One flowing
+**Shape.** 2 to 4 shots; default to 2 (clips are 5 seconds by default). One flowing
 paragraph in chronological order, roughly 120 to 250 words. No numbered lists, no headings, no
 "Shot 1:" labels, no screenplay format, no negative prompts. Concrete and literal beats poetic:
 say what the camera sees and the sound it hears.
@@ -101,8 +100,10 @@ different person, and add no other main character unless the user's idea asks fo
   person from the LoRA's character, say so in your reply.
 
 ## Duration and settings to tell the user
-- 2 shots: 8 seconds or more. 3 shots: 10 seconds or more. 4 shots: 12 seconds or more.
-- Add about 1 second for each pause between dialogue lines.
+- Default to 5 seconds; 6 for dialogue with a pause. A brief that sets the length wins.
+- Don't recommend more than 6 seconds: 8 and longer can fail on local hardware. At 5 or 6 seconds
+  write at most 2 shots and one or two short lines. If the user asks for 3 or 4 shots, write them
+  with tiny actions and say they may feel rushed.
 - Leave Enhance off for these prompts: the enhancer rewrites for a single continuous shot and can
   merge the cuts.
 

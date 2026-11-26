@@ -2011,7 +2011,7 @@ function continuationResolution(shortSide: number): string {
 
 const DEFAULT_VIDEO_SETTINGS = {
   model: 'fast',
-  duration: null as number | null, // null = Auto; falls back to a fixed length where Auto isn't available
+  duration: 5 as number | null, // null = Auto; falls back to a fixed length where Auto isn't available
   videoResolution: '540p',
   fps: 24,
   aspectRatio: '16:9',
@@ -3586,12 +3586,13 @@ export function GenSpace() {
   const [sheetMakerOpen, setSheetMakerOpen] = useState(false)
   const promptRef = useRef(prompt)
   promptRef.current = prompt
-  // After the prompt lands, RiX itself offers to save it (with the reference image) to the library.
+  // Saving is only ever the "Save prompt" button; Claude's folder suggestion is kept to prefill it.
+  const claudeFolderRef = useRef<string | undefined>(undefined)
   const [savePromptOffer, setSavePromptOffer] = useState<{ prompt: string; imagePath?: string; folder?: string; thumbnailOnly?: boolean } | null>(null)
   useEffect(
     () => registerGenerationPromptTarget((next, meta) => {
       applyEnhanceResult(promptRef.current, next)
-      setSavePromptOffer({ prompt: next, imagePath: meta.imagePath, folder: meta.folder, thumbnailOnly: meta.thumbnailOnly })
+      claudeFolderRef.current = meta.folder
     }),
     [applyEnhanceResult],
   )
@@ -5261,7 +5262,19 @@ export function GenSpace() {
           onPromptWithClaude={mode === 'video' || isIngredientsMode
             ? () => setPromptWithClaudeOpen(true)
             : mode === 'image' ? () => setSheetMakerOpen(true) : undefined}
-          onSavePrompt={() => setSavePromptOffer({ prompt: prompt.trim(), imagePath: inputImage ?? undefined })}
+          onSavePrompt={() => {
+            // In IC-LoRA mode the picture is the IC-LoRA input (an Ingredients sheet, say): it is the
+            // thumbnail only, never a first frame. A video input has no thumbnail.
+            const icImage = mode === 'ic-lora' && /\.(png|jpe?g|webp|bmp)$/i.test(icLoraInput.videoPath ?? '')
+              ? icLoraInput.videoPath ?? undefined
+              : undefined
+            setSavePromptOffer({
+              prompt: prompt.trim(),
+              imagePath: mode === 'ic-lora' ? icImage : inputImage ?? undefined,
+              thumbnailOnly: mode === 'ic-lora',
+              folder: claudeFolderRef.current,
+            })
+          }}
           canUndoPrompt={canUndoPrompt}
           onUndoPrompt={handleUndoPrompt}
           canRedoPrompt={canRedoPrompt}
