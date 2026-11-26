@@ -98,6 +98,11 @@ export const generationParamsSchema = z.object({
   icLoraVideoPath: z.string().optional(),
   icLoraConditioningType: z.string().optional(),
   icLoraConditioningStrength: z.number().optional(),
+  // Catalog IC-LoRA runs (e.g. Ingredients): enough to regenerate the clip.
+  icLoraId: z.string().optional(),
+  icLoraVariantId: z.string().optional(),
+  icLoraControlValues: z.record(z.string(), z.union([z.number(), z.string()])).optional(),
+  icLoraLoraStrength: z.number().optional(),
   loras: z.array(z.object({
     ref: z.string(),
     name: z.string(),

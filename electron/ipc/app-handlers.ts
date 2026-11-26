@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { checkGPU } from '../gpu'
 import { isPythonReady, downloadPythonEmbed } from '../python-setup'
-import { getBackendHealthStatus, getBackendUrl, getAuthToken, getAdminToken, startPythonBackend, setGenerationActive } from '../python-backend'
+import { getBackendHealthStatus, getBackendUrl, getAuthToken, getAdminToken, startPythonBackend, restartPythonBackend, setGenerationActive } from '../python-backend'
 import { getMainWindow } from '../window'
 import { getAnalyticsState, setAnalyticsEnabled, sendAnalyticsEvent } from '../analytics'
 import {
@@ -157,6 +157,10 @@ export function registerAppHandlers(): void {
 
   handle('startPythonBackend', async () => {
     await startPythonBackend()
+  })
+
+  handle('forceRestartBackend', async () => {
+    await restartPythonBackend()
   })
 
   handle('getBackendHealthStatus', () => {

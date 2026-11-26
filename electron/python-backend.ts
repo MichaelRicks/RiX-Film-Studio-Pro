@@ -537,6 +537,37 @@ export async function startPythonBackend(): Promise<void> {
   }
 }
 
+/**
+ * Force stop: a GPU step (or the video encode around it) can't be interrupted from Python, so a
+ * Stop only lands between denoise steps. When the GPU is overcommitted those steps take minutes.
+ * This kills the backend (freeing all GPU memory) and starts a fresh one; the app stays open and
+ * the models load again on the next generation.
+ */
+export async function restartPythonBackend(): Promise<void> {
+  const proc = pythonProcess
+  if (!proc) {
+    await startPythonBackend()
+    return
+  }
+  publishBackendHealthStatus({ status: 'restarting' })
+  // Wait for the old process to really exit before starting the new one: its exit handler reads
+  // shared module state, and the new one needs the port.
+  const exited = new Promise<void>((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve()
+      return
+    }
+    proc.once('exit', () => resolve())
+    setTimeout(resolve, 10000)
+  })
+  logger.info('Force stop: restarting the Python backend')
+  stopPythonBackend()
+  await exited
+  activeGenerationCount = 0
+  generationActiveSince = null
+  await startPythonBackend()
+}
+
 export function stopPythonBackend(): void {
   if (pythonProcess) {
     isIntentionalShutdown = true

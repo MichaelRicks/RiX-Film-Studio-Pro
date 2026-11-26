@@ -528,6 +528,11 @@ export const electronAPISchemas = {
     input: z.object({}),
     output: z.void(),
   },
+  // Force stop: kill and restart the backend when a Stop can't land (the GPU is mid-step).
+  forceRestartBackend: {
+    input: z.object({}),
+    output: z.void(),
+  },
   getBackendHealthStatus: {
     input: z.object({}),
     output: backendHealthStatus.nullable(),

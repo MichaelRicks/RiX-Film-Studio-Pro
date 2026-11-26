@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ExternalLink, Loader2, Sparkles, X } from 'lucide-react'
 import { pathToFileUrl } from '../lib/file-url'
+import { layoutSheet } from '../lib/sheet-layout'
 import { useClaudeRun } from '../hooks/use-claude-run'
 import { LibraryImagePicker } from './LibraryImagePicker'
 import { CropImageDialog } from './CropImageDialog'
@@ -10,7 +11,7 @@ import { GPM_IMAGE_DND_TYPE, saveDataUrlToTempFile, type GpmDndImage } from './g
 import { imagePathsFromDataTransfer } from '../lib/keyframe-drop'
 
 /**
- * "Prompt with Claude" in Image mode: asks the questions the rix-sheet-maker skill needs
+ * "Prompt with Claude" in Image mode: asks the questions the rix-ingredients-sheet skill needs
  * (what goes on the sheet, who/what it is, style), then has the user's own Claude write the
  * still-image prompt for a reference sheet and put it in the prompt box with set_generation_prompt.
  * The sheet is then generated with the normal Image mode and used as the Ingredients input.
@@ -36,6 +37,9 @@ export interface SheetBrief {
   refs: RefImage[]
   // With a character image: keep what they wear in it, or use the outfit described below.
   keepOutfit: boolean
+  // 'describe': Claude studies the images and writes a brand-new sheet from detailed text alone (no
+  // image goes to the image model). 'attach': the images are also attached as likeness references.
+  refUse: 'describe' | 'attach'
 }
 
 export type RefRole = 'character' | 'outfit' | 'location' | 'prop' | 'sheet' | 'turnaround' | 'face'
@@ -76,11 +80,13 @@ export function buildSheetBrief(b: SheetBrief): string {
   const none = '(not given: invent a distinctive, specific choice and tell me what you chose)'
   const parts: string[] = []
   if (b.character) parts.push(b.characterCount === 2 ? 'two characters' : 'one character')
-  if (b.outfits) parts.push('several outfits of the character')
-  if (b.location) parts.push('a location')
-  if (b.props) parts.push('props')
+  // An image given a role puts that item on the sheet even if its toggle above is off.
+  const has = (role: RefRole) => b.refs.some(r => r.role === role)
+  if (b.outfits || has('outfit')) parts.push(b.outfits ? 'several outfits of the character' : 'the outfit')
+  if (b.location || has('location')) parts.push('a location')
+  if (b.props || has('prop')) parts.push('props')
   return [
-    'Write the still-image prompt for a reference sheet for RiX\'s Ingredients IC-LoRA, using the rix-sheet-maker skill. My answers to its questions are below, so do not ask me anything. Pick the layout yourself from the content. Then put the finished image prompt in RiX\'s prompt box with set_generation_prompt (the prompt text only: no image_path, folder "Reference Sheets"). Do not generate anything.',
+    'Write the still-image prompt for a reference sheet for RiX\'s Ingredients IC-LoRA, using the rix-ingredients-sheet skill. My answers to its questions are below, so do not ask me anything. Pick the layout yourself from the content. Then put the finished image prompt in RiX\'s prompt box with set_generation_prompt (the prompt text only: no image_path, folder "Reference Sheets"). Do not generate anything.',
     '',
     `The sheet holds: ${parts.join(', ')}.`,
     ...(b.character ? [`Character${b.characterCount === 2 ? 's' : ''}: ${b.characterText.trim() || none}`] : []),
@@ -92,7 +98,13 @@ export function buildSheetBrief(b: SheetBrief): string {
     ...(b.refs.length > 0
       ? [
           `I attached ${b.refs.length} existing image${b.refs.length === 1 ? '' : 's'}. Look at EACH with inspect_media (frames 1, width 1280 or more, one call per image) and follow the "Character from a reference image" and "Converting an existing sheet or several images" sections of the skill. Describe exactly what each shows; do not invent or "improve" anything. The text I wrote above is only changes or extras to what the images show.`,
+          b.refUse === 'describe'
+            ? 'TEXT-ONLY SHEET: these images are for you to study. None of them will be attached in the image tool: the image model sees only your words and draws a brand-new sheet from them. Follow the "Text-only sheet" section of the skill: describe every person, garment, place and prop in full, concrete detail, never write a likeness line, and never mention an attached, reference or uploaded image in the prompt.'
+            : 'ATTACHED: I will also attach the images in my image tool as likeness references.',
           ...b.refs.map((r, i) => `Image ${i + 1}: ${r.path}\n  Role: ${ROLES.find(x => x.id === r.role)?.text}.`),
+          ...(b.refs.some(r => r.role === 'location' || r.role === 'prop' || r.role === 'outfit')
+            ? [`Every image above with the role Outfit, Location or Prop gets its own panel on the sheet (${b.refs.map((r, i) => r.role === 'location' || r.role === 'prop' || r.role === 'outfit' ? `Image ${i + 1}: ${ROLES.find(x => x.id === r.role)?.label}` : '').filter(Boolean).join(', ')}). Do not drop any of them: count the panels against this list before you finish.`]
+            : []),
           ...(b.refs.some(r => r.role === 'outfit')
             ? ['Outfit: an Outfit image is attached, so the character WEARS that outfit in every full-body view of the turnaround (and its neckline or collar in the face close-up). It also gets its own garment panel, shown whole, front and back, never cropped. Ignore what the character wears in their own image, but keep their hair, headwear-free face and any accessories I did not replace.']
             : []),
@@ -101,10 +113,12 @@ export function buildSheetBrief(b: SheetBrief): string {
                 b.keepOutfit
                   ? 'Outfit: keep what the character wears in their image.'
                   : 'Outfit: do not use the outfit in the character image; use the outfit I described.',
-                'Start the sheet prompt by telling the image model to use the attached reference image as the exact likeness of the person in every panel.',
+                ...(b.refUse === 'attach'
+                  ? ['Start the sheet prompt by telling the image model to use the attached reference image as the exact likeness of the person in every panel.']
+                  : []),
               ]
             : []),
-          'Tell me which of these images to attach in my image tool for the sheet.',
+          ...(b.refUse === 'attach' ? ['Tell me which of these images to attach in my image tool for the sheet.'] : []),
         ]
       : ['No existing images.']),
     '',
@@ -112,7 +126,9 @@ export function buildSheetBrief(b: SheetBrief): string {
   ].join('\n')
 }
 
-export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onClose }: {
+export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onClearInput, onClose }: {
+  /** Clears RiX's Image input, so a text-only sheet is a brand-new image, not an edit of a photo. */
+  onClearInput?: () => void
   /** Loads an image as the Image input and fills the prompt box (for the clean-background helper). */
   onCleanup?: (path: string, prompt: string) => void
   /** Sets the Image-mode input image (used for the 16:9 canvas helper). */
@@ -132,7 +148,7 @@ export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onC
     outfits: false, outfitsText: '',
     location: false, locationText: '',
     props: false, propsText: '',
-    style: 'photoreal', aspect: '16:9', refs: rememberedRefs.length ? rememberedRefs : inputImage ? [{ path: inputImage, role: 'character' }] : [], keepOutfit: true,
+    style: 'photoreal', aspect: '16:9', refs: rememberedRefs.length ? rememberedRefs : inputImage ? [{ path: inputImage, role: 'character' }] : [], keepOutfit: true, refUse: 'describe',
   })
   const set = <K extends keyof SheetBrief>(k: K, v: SheetBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
 
@@ -143,7 +159,10 @@ export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onC
   const prompt = buildSheetBrief(brief)
 
   const close = () => { c.cancel(); onClose() }
-  const writeHere = () => { void c.startRun(prompt) }
+  const writeHere = () => {
+    if (brief.refUse === 'describe' && inputImage) onClearInput?.()
+    void c.startRun(prompt)
+  }
   const sendFollowUp = () => {
     const t = followUp.trim()
     if (!t || !c.run?.sessionId) return
@@ -281,34 +300,45 @@ export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onC
       ...(brief.refs.filter(r => r.role === 'face').slice(0, 1).length ? brief.refs.filter(r => r.role === 'face').slice(0, 1) : brief.refs.filter(r => r.role === 'character').slice(0, 1)),
       ...brief.refs.filter(r => r.role === 'turnaround'),
     ]
-    const rows = [top, bottomTiles(brief.refs)].filter(r => r.length > 0)
-    if (rows.length === 0) return
+    // Character first (face close-up or photo, then turnarounds), then outfits, props, location.
+    const order = [...top, ...bottomTiles(brief.refs)]
+    if (order.length === 0) return
     setCanvasBusy(true)
     setFinalMsg(null)
     try {
-      const W = 1920, H = 1080, gap = 12
-      const loaded = await Promise.all(rows.map(r => Promise.all(r.map(x => loadImg(x.path)))))
-      const heights = loaded.map(row => (W - gap * (row.length - 1)) / row.reduce((a, im) => a + im.naturalWidth / im.naturalHeight, 0))
-      const total = heights.reduce((a, h) => a + h, 0) + gap * (rows.length - 1)
-      const k = Math.min(1, H / total)
+      const W = 1920, H = 1080
+      const imgs = await Promise.all(order.map(x => loadImg(x.path)))
+      const tiles = layoutSheet(
+        imgs.map((im, i) => ({
+          aspect: im.naturalWidth / im.naturalHeight,
+          keepTop: ['character', 'face', 'turnaround'].includes(order[i].role),
+          weight: ['character', 'face', 'turnaround'].includes(order[i].role) ? 1.5 : 1,
+        })),
+        W, H, 24, 28,
+      )
       const cv = document.createElement('canvas')
       cv.width = W; cv.height = H
       const g = cv.getContext('2d')
       if (!g) return
-      g.fillStyle = '#1c1c1c'
+      // Looks like a reference sheet (light grey board, clear gaps, small role labels), so the
+      // Ingredients IC-LoRA reads it as a sheet and not as a split-screen frame to animate.
+      g.fillStyle = '#c9c9c9'
       g.fillRect(0, 0, W, H)
-      let y = (H - total * k) / 2
-      loaded.forEach((row, ri) => {
-        const h = heights[ri] * k
-        const rowW = row.reduce((a, im) => a + h * im.naturalWidth / im.naturalHeight, 0) + gap * (row.length - 1)
-        let x = (W - rowW) / 2
-        for (const im of row) {
-          const w = h * im.naturalWidth / im.naturalHeight
-          g.drawImage(im, x, y, w, h)
-          x += w + gap
+      g.font = '600 20px Arial, sans-serif'
+      g.textBaseline = 'middle'
+      for (const t of tiles) {
+        const im = imgs[t.index]
+        const nw = im.naturalWidth, nh = im.naturalHeight
+        g.drawImage(im, t.sx * nw, t.sy * nh, t.sw * nw, t.sh * nh, t.dx, t.dy, t.dw, t.dh)
+        const label = (ROLES.find(x => x.id === order[t.index].role)?.label ?? '').toUpperCase()
+        if (label) {
+          const tw = g.measureText(label).width
+          g.fillStyle = 'rgba(20,20,20,0.75)'
+          g.fillRect(t.dx + 10, t.dy + 10, tw + 20, 32)
+          g.fillStyle = '#ffffff'
+          g.fillText(label, t.dx + 20, t.dy + 26)
         }
-        y += h + gap * k
-      })
+      }
       const p = await saveDataUrlToTempFile(cv.toDataURL('image/png'), 'ingredients-sheet-assembled-16x9.png')
       setFinalPath(p)
       // Offer the library folders; default to a sheet-like one, else a new "Reference Sheets".
@@ -506,6 +536,20 @@ export function SheetMakerModal({ inputImage = null, onUseCanvas, onCleanup, onC
               {libOpen && (
                 <LibraryImagePicker selected={brief.refs.map(r => r.path)}
                   onPick={(p) => addPaths([p])} onClose={() => setLibOpen(false)} />
+              )}
+              {brief.refs.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex gap-1.5">
+                    {([['describe', 'Describe them in words (new sheet)'], ['attach', 'Also attach as likeness']] as ['describe' | 'attach', string][]).map(([v, label]) => (
+                      <button key={v} type="button" onClick={() => set('refUse', v)} className={pill(brief.refUse === v)}>{label}</button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 leading-relaxed">
+                    {brief.refUse === 'describe'
+                      ? 'Claude studies each image and writes a detailed description; the image model draws a brand-new sheet from the words alone. Any Image input is cleared when you start.'
+                      : 'The images also go to the image model as references (an edit). Closer likeness, but the sheet can keep the photo\'s shape or background.'}
+                  </p>
+                </div>
               )}
               {hasCharacterRef && !brief.refs.some(r => r.role === 'outfit') && (
                 <div className="flex gap-1.5">

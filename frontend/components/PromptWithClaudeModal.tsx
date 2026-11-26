@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ExternalLink, Loader2, Sparkles, X } from 'lucide-react'
 import { pathToFileUrl } from '../lib/file-url'
+import { getLoraCard, setLoraCard, type LoraCard } from '../lib/lora-cards'
 
 /**
  * "Prompt with Claude": turns a short idea (+ the reference image, if any) into a brief and
@@ -21,12 +22,13 @@ type ImageKind = 'first-frame' | 'sheet'
 // 'cinematic' adds lens character with soft readable light; 'blockbuster' adds the full lens +
 // hard-light lock. Flare is a separate switch.
 // 'keep' only exists in Revise mode: leave whatever look the prompt already has alone.
-type Look = 'keep' | 'natural' | 'cinematic' | 'blockbuster'
+type Look = 'keep' | 'natural' | 'cinematic' | 'blockbuster' | 'phone'
 const KEEP_LOOK = { id: 'keep' as Look, label: 'Keep', hint: 'Leave the look the prompt already has as it is.' }
 const LOOKS: { id: Look; label: string; hint: string }[] = [
   { id: 'natural', label: 'Natural', hint: 'Plain, realistic light. Best for dialogue and groups.' },
   { id: 'cinematic', label: 'Cinematic', hint: 'Film lens look (oval bokeh, shallow focus, grain) with soft, readable light.' },
   { id: 'blockbuster', label: 'Blockbuster', hint: 'Film lens look with hard light, rim light and deep shadow.' },
+  { id: 'phone', label: 'Phone', hint: 'Handheld phone-video look: plain, unflattering real-world light, no lens effects. For realism that must not look AI.' },
 ]
 
 export interface PromptBrief {
@@ -50,6 +52,29 @@ export interface PromptBrief {
   seconds: number | null
   // The user removed the first-frame image in this window: the prompt must stand on text alone.
   imageRemoved: boolean
+  // LoRAs selected in Create, with the user's character card for each (trigger word, looks).
+  characterLoras: CharacterLora[]
+}
+
+export interface CharacterLora extends LoraCard { ref: string; name: string; scale: number }
+
+/** Tell Claude who the selected LoRA draws, so it writes that person instead of inventing one. */
+function characterLines(brief: PromptBrief): string[] {
+  return brief.characterLoras.flatMap(l => {
+    const trigger = l.trigger.trim()
+    const desc = l.description.trim()
+    return [
+      '',
+      `Character LoRA selected: "${l.name}" at strength ${l.scale.toFixed(2)}. It draws one specific character, so the main character of this prompt IS that character: never invent a different person, and add no other main character unless my idea asks for one. Follow the "Character LoRA" section of the skill.`,
+      trigger
+        ? `Trigger word: ${trigger}. Use it as the character's name at their first mention in EVERY shot, written exactly like that (for example "${trigger}, a woman in her early thirties..."), never with @ or quotes around it.`
+        : 'No trigger word was given: refer to the character plainly and consistently in every shot.',
+      desc
+        ? `What the character looks like (use these words in every shot, ${brief.mode === 'revise' ? 'replace any description in the prompt that contradicts them, ' : ''}and add nothing that contradicts them): ${desc}`
+        : 'No description was given: keep the character\'s appearance words few and plain (age, build, clothing) and let the LoRA supply the face. Do not invent hair colour, eye colour, scars or other distinctive features.',
+      ...(l.imagePath ? [`Reference photo of this character (look at it with inspect_media and describe what you see, in the same words every shot): ${l.imagePath}`] : []),
+    ]
+  })
 }
 
 const LENGTHS = [5, 6, 8, 10] as const
@@ -87,6 +112,12 @@ function lookLines(brief: PromptBrief, sheet: boolean): string[] {
       ? ['Look: Natural. Remove any lens, bokeh, film-grain, flare or hard-light wording and keep plain, realistic light.']
       : []
   }
+  if (brief.look === 'phone') {
+    return [
+      `Look: Phone. Use the rix-lens skill's PHONE look lock (no lens, flare or film wording) and restate it in the same words in every shot${brief.mode === 'revise' ? ', replacing any look wording already in the prompt' : ''}.`,
+      ...(brief.imagePath && !sheet ? ['The first-frame image’s own light and framing win: describe them as they are in shot 1.'] : []),
+    ]
+  }
   return [
     `Look: ${brief.look === 'cinematic' ? 'Cinematic' : 'Blockbuster'}. Use the rix-lens skill to build the look lock and restate it in the same words in every shot${brief.mode === 'revise' ? ', replacing any look wording already in the prompt' : ''}. Flare (scale 0 to 1, see the flare strength section of rix-lens): ${flareWords(brief.flare)}.`,
     ...(brief.imagePath && !sheet ? ['The first-frame image\'s own light and framing win: describe them as they are in shot 1 and add the look from the first cut.'] : []),
@@ -111,6 +142,7 @@ function buildReviseBrief(brief: PromptBrief): string {
       : []),
     ...lookLines(brief, sheet),
     ...lengthLines(brief),
+    ...characterLines(brief),
     '',
     'Keep the whole revised prompt under 4500 characters (the LTX API refuses over 5000).',
     'Reply in one or two lines: what you changed, and the duration to set. Do not generate anything.',
@@ -141,6 +173,7 @@ It is attached to the Ingredients IC-LoRA as an appearance reference ONLY. Follo
       ? 'Dialogue: include a few short spoken lines if they suit the scene.'
       : 'Dialogue: none. Sound and ambience only.',
     ...lookLines(brief, sheet),
+    ...characterLines(brief),
     // A new prompt starts clean: the old prompt-box text is never passed along, so nothing from the
     // previous scene (place, outfit, action, dialogue) leaks into it. Revise mode is for building on it.
     '',
@@ -164,12 +197,14 @@ interface Run {
 type McpStatus = Awaited<ReturnType<typeof window.electronAPI.mcpGetStatus>>
 type ConnectStatus = Awaited<ReturnType<typeof window.electronAPI.claudeConnectStatus>>
 
-export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath, ingredients = false, onRemoveImage, onPickSeconds, onClose }: {
+export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath, ingredients = false, onRemoveImage, onPickSeconds, loras, onClose }: {
   imagePath: string | null
   /** Clears the first-frame image in RiX too, so the next generation starts from text alone. */
   onRemoveImage?: () => void
   /** Sets RiX's Duration to the clip length picked here. */
   onPickSeconds?: (seconds: number) => void
+  /** LoRAs selected in Create (refs relative to the models folder): Claude is told who they draw. */
+  loras?: { ref: string; name: string; scale: number }[]
   /** IC-LoRA mode with Ingredients: the image is a reference sheet, never a first frame. */
   ingredients?: boolean
   existingPrompt: string
@@ -191,6 +226,7 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
     resultVideoPath: lastVideoPath ?? null, lookAtResult: !!lastVideoPath,
     imagePath, imageKind: ingredients ? 'sheet' : 'first-frame', ingredients, idea: '', shots: 3, dialogue: true,
     look: existingPrompt.trim() ? 'keep' : 'natural', flare: 0, existingPrompt, seconds: null, imageRemoved: false,
+    characterLoras: (loras ?? []).map(l => ({ ...l, ...getLoraCard(l.ref) })),
   })
   const set = <K extends keyof PromptBrief>(k: K, v: PromptBrief[K]) => setBrief(b => ({ ...b, [k]: v }))
 
@@ -261,6 +297,21 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
   }
   const revise = brief.mode === 'revise'
   const sheetKind = brief.imageKind === 'sheet' && !!brief.imagePath
+  // Edits to a LoRA's character card are remembered for next time.
+  const setCard = (i: number, patch: Partial<LoraCard>) => setBrief(b => {
+    const next = b.characterLoras.map((l, j) => j === i ? { ...l, ...patch } : l)
+    const l = next[i]
+    setLoraCard(l.ref, { trigger: l.trigger, description: l.description, imagePath: l.imagePath })
+    return { ...b, characterLoras: next }
+  })
+  const pickCardImage = async (i: number) => {
+    const paths = await window.electronAPI.showOpenFileDialog({
+      title: 'Select a photo of this character',
+      filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      properties: ['openFile'],
+    })
+    if (paths && paths[0]) setCard(i, { imagePath: paths[0] })
+  }
   const removeImage = () => {
     setBrief(b => ({ ...b, imagePath: null, imageKind: 'first-frame', imageRemoved: true }))
     onRemoveImage?.()
@@ -453,6 +504,32 @@ export function PromptWithClaudeModal({ imagePath, existingPrompt, lastVideoPath
               </p>
             </div>
           </div>
+
+          {!run && brief.characterLoras.length > 0 && (
+            <div className="space-y-2 rounded-lg border border-zinc-700/70 p-3">
+              <p className="text-xs font-medium text-zinc-300">Character LoRA</p>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">Claude can't see inside a LoRA. Tell it who this one draws; RiX remembers it for next time.</p>
+              {brief.characterLoras.map((l, i) => (
+                <div key={l.ref} className="space-y-1.5 pt-1">
+                  <p className="text-[11px] text-zinc-400 truncate">{l.name} <span className="text-zinc-600">· {l.scale.toFixed(2)}</span></p>
+                  <input value={l.trigger} onChange={(e) => setCard(i, { trigger: e.target.value })}
+                    placeholder="Trigger word (e.g. storm01)" className={fieldCls} />
+                  <textarea value={l.description} onChange={(e) => setCard(i, { description: e.target.value })} rows={2}
+                    placeholder="What they look like, e.g. woman, early thirties, long dark wavy hair, sharp dark eyes, worn black leather jacket"
+                    className={`${fieldCls} resize-none`} />
+                  <div className="flex items-center gap-2">
+                    {l.imagePath && <img src={pathToFileUrl(l.imagePath)} alt="" className="h-10 w-10 object-cover rounded border border-zinc-700" />}
+                    <button type="button" onClick={() => void pickCardImage(i)} className="text-[11px] text-zinc-400 hover:text-white">
+                      {l.imagePath ? 'Change photo' : 'Add a photo of the character (optional)'}
+                    </button>
+                    {l.imagePath && (
+                      <button type="button" onClick={() => setCard(i, { imagePath: undefined })} className="text-[11px] text-zinc-500 hover:text-red-300">Remove</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {revise && (
             <div className="space-y-3">

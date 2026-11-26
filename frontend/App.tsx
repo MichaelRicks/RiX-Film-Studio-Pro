@@ -425,7 +425,7 @@ function AppContent() {
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="font-medium">Reconnecting...</span>
         </div>
-        <p className="mt-2 text-sm text-zinc-400">The backend process stopped unexpectedly. Attempting to restart...</p>
+        <p className="mt-2 text-sm text-zinc-400">The generation engine is restarting. This takes a few seconds.</p>
       </div>
     </div>
   ) : null

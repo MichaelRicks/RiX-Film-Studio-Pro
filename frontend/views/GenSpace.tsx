@@ -138,7 +138,11 @@ const REGENERABLE_MODES = new Set<string>([
   'text-to-video', 'image-to-video', 'audio-to-video', 'text-to-image', 'image-edit',
 ])
 function canRegenerateAsset(asset: Asset): boolean {
-  return !!asset.generationParams && REGENERABLE_MODES.has(asset.generationParams.mode)
+  const p = asset.generationParams
+  if (!p) return false
+  // IC-LoRA clips restore their input, IC-LoRA and settings into the IC-LoRA panel.
+  if (p.mode === 'ic-lora') return !!p.icLoraVideoPath
+  return REGENERABLE_MODES.has(p.mode)
 }
 
 // "Lightweight" post-to-X: no API keys/OAuth — opens X's compose page with
@@ -2100,6 +2104,10 @@ export function GenSpace() {
   const [reframeNotice, setReframeNotice] = useState<string | null>(null)
   // Saved LoRAs that Regenerate or Inject could not find (a notice, not an error, so the queue keeps going).
   const [loraNotice, setLoraNotice] = useState<string | null>(null)
+  // Force stop: offered when a Stop hasn't landed after a few seconds; restarts the backend.
+  const [forceStopOffer, setForceStopOffer] = useState(false)
+  const [forceStopping, setForceStopping] = useState(false)
+  const forceStoppedAtRef = useRef<number | null>(null)
   useEffect(() => { setReframing(false); setReframeNotice(null) }, [selectedAsset?.id])
   // Lightbox "Trim start": drop the first N frames and save the result as a new asset.
   const [trimOpen, setTrimOpen] = useState(false)
@@ -2171,6 +2179,14 @@ export function GenSpace() {
   } | null>(null)
   const icLoraSubmissionRef = useRef<{
     prompt: string
+    // Catalog IC-LoRA recipe, saved with the clip so Regenerate can rebuild the run.
+    recipe?: {
+      icLoraId?: string
+      variantId?: string
+      controlValues?: Record<string, number | string>
+      loraStrength?: number
+      seed?: number
+    }
     input: {
       videoPath: string
       conditioningType: ICLoraConditioningType
@@ -2252,8 +2268,16 @@ export function GenSpace() {
     error,
     reset,
     resumeIfRunning,
-    cancel,
+    cancel: cancelGeneration,
   } = useGeneration()
+
+  // Stop asks the backend to cancel; it lands between denoise steps. Remember when it was asked so
+  // Force stop can be offered if the run is still going a few seconds later.
+  const [stopRequestedAt, setStopRequestedAt] = useState<number | null>(null)
+  const cancel = useCallback(() => {
+    setStopRequestedAt(prev => prev ?? Date.now())
+    cancelGeneration()
+  }, [cancelGeneration])
 
   // generatedSeed clears on reset(); remember the most recent one for the prompt bar's
   // "lock last seed" button.
@@ -2366,6 +2390,22 @@ export function GenSpace() {
     refreshInstalledModels,
   )
   const selectedIcLora = icLoras.find(r => r.ic_lora.id === selectedIcLoraId)?.ic_lora ?? null
+
+  // Regenerate of an IC-LoRA clip: select its IC-LoRA, then put back its control values and
+  // LoRA strength (selecting seeds the defaults first, so these must come after).
+  const pendingIcLoraRegenRef = useRef<NonNullable<Asset['generationParams']> | null>(null)
+  const [icLoraRegenTick, setIcLoraRegenTick] = useState(0)
+  useEffect(() => {
+    const p = pendingIcLoraRegenRef.current
+    if (!p?.icLoraId) return
+    const item = icLoras.find(r => r.ic_lora.id === p.icLoraId)
+    if (!item) return
+    pendingIcLoraRegenRef.current = null
+    selectIcLora(item, p.icLoraVariantId ?? null)
+    if (p.icLoraControlValues) setControlValues(p.icLoraControlValues)
+    if (p.icLoraLoraStrength != null) setIcLoraLoraStrength(p.icLoraLoraStrength)
+    if (p.icLoraConditioningStrength != null) setIcLoraStrength(p.icLoraConditioningStrength)
+  }, [icLoras, icLoraRegenTick, selectIcLora])
   const isCatalogIcLora = selectedIcLora !== null
   // Ingredients IC-LoRA: its input is a reference sheet, which Prompt with Claude can describe.
   const isIngredientsMode = mode === 'ic-lora' && selectedIcLora?.id === 'ingredients'
@@ -2588,10 +2628,16 @@ export function GenSpace() {
   // Handle reference image sent from Prompt Manager Pro (keeps the prompt intact).
   useEffect(() => {
     if (!genSpaceInputImagePath) return
-    setMode('video')
-    setInputImage(genSpaceInputImagePath)
+    if (mode === 'ic-lora') {
+      // In IC-LoRA mode the image is the IC-LoRA input (an Ingredients sheet, say), like a drop.
+      setIcLoraInitial({ videoPath: genSpaceInputImagePath })
+      setIcLoraPanelKey(prev => prev + 1)
+    } else {
+      setMode('video')
+      setInputImage(genSpaceInputImagePath)
+    }
     setGenSpaceInputImagePath(null)
-  }, [genSpaceInputImagePath, setGenSpaceInputImagePath])
+  }, [genSpaceInputImagePath, setGenSpaceInputImagePath, mode])
 
   // LoRAs saved with a prompt injected from the Prompt Manager: select them so the character
   // LoRA isn't forgotten. Waits until the installed LoRA list has loaded.
@@ -3319,6 +3365,13 @@ export function GenSpace() {
             icLoraVideoPath: submission.input.videoPath,
             icLoraConditioningType: submission.input.conditioningType,
             icLoraConditioningStrength: submission.input.conditioningStrength,
+            ...(submission.recipe ? {
+              icLoraId: submission.recipe.icLoraId,
+              icLoraVariantId: submission.recipe.variantId,
+              icLoraControlValues: submission.recipe.controlValues,
+              icLoraLoraStrength: submission.recipe.loraStrength,
+              seed: submission.recipe.seed,
+            } : {}),
           },
           takes: [{
             path: copied.path,
@@ -3773,6 +3826,13 @@ export function GenSpace() {
         await startOrQueue(queueLabel('IC-LoRA', prompt), async () => {
           icLoraSubmissionRef.current = {
             prompt,
+            recipe: {
+              icLoraId: selectedIcLora.id,
+              variantId: selectedIcLoraVariantId ?? undefined,
+              controlValues,
+              loraStrength: advancedIcLoraControls ? icLoraLoraStrength : undefined,
+              seed: appSettings.seedLocked ? appSettings.lockedSeed : undefined,
+            },
             input: {
               videoPath: icVideoPath,
               conditioningType: 'custom',
@@ -4035,6 +4095,19 @@ export function GenSpace() {
   // existing Lock Seed setting (unlocked = a fresh variation).
   const handleRegenerate = useCallback(async (asset: Asset) => {
     const params = asset.generationParams
+    if (params?.mode === 'ic-lora' && params.icLoraVideoPath) {
+      // Back into the IC-LoRA panel with the same input, IC-LoRA, settings and prompt.
+      setActiveRetakeSource(null)
+      setActiveIcLoraSource(null)
+      setMode('ic-lora')
+      setPrompt(params.prompt)
+      setIcLoraInitial({ videoPath: params.icLoraVideoPath })
+      setIcLoraPanelKey(prev => prev + 1)
+      if (params.icLoraId) pendingIcLoraRegenRef.current = params
+      setIcLoraRegenTick(t => t + 1)
+      if (params.seed != null) updateAppSettings({ seedLocked: true, lockedSeed: params.seed })
+      return null
+    }
     if (!params || !REGENERABLE_MODES.has(params.mode)) return
     const isImageGen = params.mode === 'text-to-image' || params.mode === 'image-edit'
 
@@ -4349,6 +4422,38 @@ export function GenSpace() {
         setDispatchTick(t => t + 1)
       })
   }, [genQueue, dispatchTick, slotBusyLocally, isOtherGenerationRunning, isGenerating, isRetaking, isExtending, isIcLoraGenerating, videoPath, imagePaths.length, retakeResult, extendResult, icLoraResult, error, localError])
+
+  const anyJobRunning = isGenerating || isRetaking || isExtending || isIcLoraGenerating
+  useEffect(() => {
+    if (!anyJobRunning) {
+      setStopRequestedAt(null)
+      setForceStopOffer(false)
+      return
+    }
+    if (stopRequestedAt == null) return
+    const id = setTimeout(() => setForceStopOffer(true), Math.max(0, stopRequestedAt + 8000 - Date.now()))
+    return () => clearTimeout(id)
+  }, [anyJobRunning, stopRequestedAt])
+
+  const forceStop = async () => {
+    setForceStopping(true)
+    forceStoppedAtRef.current = Date.now()
+    try {
+      await window.electronAPI.forceRestartBackend()
+    } finally {
+      setForceStopping(false)
+      setForceStopOffer(false)
+    }
+  }
+
+  // The request a Force stop cut off fails with a lost connection: that is the stop, not an error.
+  const forceStopRecent = forceStoppedAtRef.current != null && Date.now() - forceStoppedAtRef.current < 180000
+  useEffect(() => {
+    if (!forceStopRecent || (!error && !localError)) return
+    if (error) reset()
+    if (localError) { setLocalError(null); resetRetake(); resetIcLora() }
+    forceStoppedAtRef.current = null
+  }, [forceStopRecent, error, localError, reset, resetRetake, resetIcLora])
 
   useEffect(() => {
     if (!slotBusyLocally && genQueue.length === 0) setActiveJobLabel(null)
@@ -5076,6 +5181,15 @@ export function GenSpace() {
         )}
 
         {/* Selected plain LoRAs (video gen only) — one chip each, info from the matched catalog entry. */}
+        {forceStopOffer && anyJobRunning && (
+          <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            <span className="flex-1">Still stopping: the GPU is in the middle of a step, which can take minutes when it is short of memory. Force stop restarts the generation engine; the app stays open and models reload on the next run.</span>
+            <button onClick={() => void forceStop()} disabled={forceStopping}
+              className="flex-shrink-0 rounded-md bg-red-600 px-3 py-1.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50">
+              {forceStopping ? 'Restarting…' : 'Force stop'}
+            </button>
+          </div>
+        )}
         {loraNotice && (
           <div className="mx-auto mb-2 flex max-w-3xl items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
             <span className="flex-1">{loraNotice}</span>
@@ -5107,7 +5221,7 @@ export function GenSpace() {
           />
         )}
 
-        {sheetMakerOpen && <SheetMakerModal inputImage={inputImage} onUseCanvas={setInputImage} onCleanup={(p, pr) => { setInputImage(p); setPrompt(pr) }} onClose={() => setSheetMakerOpen(false)} />}
+        {sheetMakerOpen && <SheetMakerModal inputImage={inputImage} onUseCanvas={setInputImage} onClearInput={() => setInputImage(null)} onCleanup={(p, pr) => { setInputImage(p); setPrompt(pr) }} onClose={() => setSheetMakerOpen(false)} />}
 
         {promptWithClaudeOpen && (
           <PromptWithClaudeModal
@@ -5116,6 +5230,9 @@ export function GenSpace() {
             existingPrompt={prompt}
             lastVideoPath={claudeVideoPath ?? videoPath}
             onRemoveImage={() => setInputImage(null)}
+            loras={!isIngredientsMode && mode === 'video' && canUseUserLoras
+              ? selectedLoras.map(l => ({ ref: toModelsDirRelativeRef(l.ref, appSettings.modelsDir), name: l.name, scale: l.scale }))
+              : undefined}
             onPickSeconds={(s) => setSettings(prev => ({ ...prev, duration: s }))}
             onClose={() => { setPromptWithClaudeOpen(false); setClaudeVideoPath(null) }}
           />
@@ -5587,7 +5704,7 @@ export function GenSpace() {
         </div>
       )}
 
-      {(error || localError) && (
+      {(error || localError) && !forceStopRecent && (
         <GenerationErrorDialog
           error={(error || localError)!}
           onDismiss={() => {

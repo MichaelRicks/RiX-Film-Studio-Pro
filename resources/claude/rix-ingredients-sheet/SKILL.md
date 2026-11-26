@@ -44,19 +44,39 @@ be that person, not a lookalike:
    shoes, the side profile) and what you assumed.
 3. Outfit: keep the image's outfit unless the brief says to use a different one. If the image is a
    close-up with no outfit visible, invent one that fits and say so.
-4. Open the sheet prompt with the canvas line and then the likeness line, in this order:
+4. (Attached mode only; a text-only sheet skips the likeness line.) Open the sheet prompt with the
+   canvas line and then the likeness line, in this order:
    "Create a new landscape 16:9 image, 1920 by 1080, a tiled grid of separate hard-edged panels.
    The attached picture is a likeness reference only: its size, framing and background are not
    reused." then "Use the attached reference image as the exact likeness of this person: identical
    face, hair, skin and age in every panel." Then the layout and the facts from step 2. The prompt
    must still stand on its own, because some image tools ignore the attachment.
 5. Other panels (props, location) come from the user's text as usual.
-6. Tell the user to attach the same image in their image tool as a reference (in RiX's Image mode,
+6. (Attached mode only.) Tell the user to attach the same image in their image tool as a reference (in RiX's Image mode,
    load it as the input image; raise the image strength if the face drifts, lower it if the
    sheet layout won't form), and to check the face against the original before approving: the
    face close-up panel is where likeness is won or lost.
 7. If they bring the first result back, `inspect_media` both images and name the differences (eye
    shape, hair line, age) so the prompt can be corrected, rather than rerolling blindly.
+
+## Text-only sheet (when the brief says TEXT-ONLY SHEET; the default)
+The user's images are for you to study, and none of them reach the image model. It draws a
+brand-new sheet from your words alone, so the words must carry everything the picture showed.
+- Open with the canvas line only ("Create a new landscape 16:9 image, 1920 by 1080, a tiled grid of
+  separate hard-edged panels."). Never write a likeness line, and never mention an attached,
+  reference or uploaded image anywhere in the prompt.
+- Describe each person in full, concrete detail, about 60 to 100 words for the face and hair alone:
+  apparent age, face shape, eye colour and shape, brows, nose, lips, skin tone and texture, every
+  scar, freckle or line, hair colour, length, texture and parting, build. Then every garment with
+  colour, material, fit and wear, shoes and accessories. Use the same words in every panel that
+  shows that person.
+- Describe each garment, place and prop the same way (cut, material, colour, wear, parts; for a
+  place: layout, materials, furniture and every light source with its colour and position).
+- Write what is there, not what would look better. Name in your reply what you could not see and
+  what you assumed.
+- Skip the "attach it in your image tool" steps below. Remind the user that Image mode must have no
+  input image loaded for this sheet (RiX clears it), and that likeness comes only from the words,
+  so they should compare the face close-up with the original before approving.
 
 ## Converting an existing sheet or several images into an Ingredients sheet
 The user may bring a finished character sheet (any layout, maybe turnaround only) or a few separate
@@ -68,16 +88,16 @@ images: a character, an outfit, a location, a prop. The brief names each image a
    Use the image's own colours. Never "improve" or add anything.
 3. An existing sheet that is already usable may only need panels added. Say so, name the panels it
    has and the ones missing, and write the prompt for the new sheet with ALL panels (the image
-   tool makes one picture), pointing at the old sheet as the likeness source.
+   tool makes one picture). In attached mode, point at the old sheet as the likeness source; in text-only mode, describe its character in full instead.
 4. Choose the layout from the roles supplied (usually F for four or more items, C for three, A/B
-   for a character with one extra) and write the sheet prompt. Open it with the likeness line
-   when a character image exists. Ignore any text, labels or borders in the old sheet; do not copy
+   for a character with one extra) and write the sheet prompt. In attached mode, open it with the
+   likeness line when a character image exists; in text-only mode, never. Ignore any text, labels or borders in the old sheet; do not copy
    them.
 5. Outfit image supplied: the character WEARS that outfit in every full-body view and its collar
    shows in the face close-up; the outfit also gets its own panel with the whole garment visible,
    front and back, not cropped. What the character wore in their own photo is dropped (hair, face
    and accessories stay). A prop or location image gets its own panel the same way.
-6. Tell the user which images to attach in their image tool (all of them, each as a reference), and
+6. (Attached mode only.) Tell the user which images to attach in their image tool (all of them, each as a reference), and
    which panel each one feeds. If the tool only takes one image, say which to attach (the
    character) and that the rest are carried by the written description.
 

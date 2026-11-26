@@ -87,6 +87,19 @@ bodies and limbs, so build this into every prompt, in positive wording only (no 
 restrained choices that fit the image's look. Don't add new characters unless asked: extra people
 are what breaks consistency. A single character, or one character plus one prop, is safest.
 
+## Character LoRA (when the brief names one)
+A character LoRA draws one specific person. Claude can't see inside it, so the brief gives a trigger
+word, a description and sometimes a photo. That character IS the main character: never invent a
+different person, and add no other main character unless the user's idea asks for one.
+- Write the trigger word as the character's name at their first mention in every shot, exactly as
+  given ("storm01, a woman in her early thirties..."), never with @ or quotes around it.
+- Describe the character with the brief's words (or what the photo shows), the same words in every
+  shot. Nothing may contradict them: no new hair colour, eye colour, age or build.
+- With no description, keep appearance words few and plain (age, build, clothing) and let the LoRA
+  supply the face. Don't invent distinctive features.
+- A first-frame image still wins for shot 1's framing, light and setting. If it shows a different
+  person from the LoRA's character, say so in your reply.
+
 ## Duration and settings to tell the user
 - 2 shots: 8 seconds or more. 3 shots: 10 seconds or more. 4 shots: 12 seconds or more.
 - Add about 1 second for each pause between dialogue lines.
