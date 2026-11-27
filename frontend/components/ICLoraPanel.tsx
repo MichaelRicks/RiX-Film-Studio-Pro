@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Upload, Loader2, Film, Sparkles, Image as ImageIcon,
-  RefreshCw, Download, AlertCircle, Trash2, Square, Clock,
+  RefreshCw, Download, AlertCircle, Trash2, Square, Clock, ArrowLeft,
 } from 'lucide-react'
 import { ApiClient, type ApiRequestBodyOf, type ApiSuccessOf } from '../lib/api-client'
 import { logger } from '../lib/logger'
@@ -45,6 +45,8 @@ interface ICLoraPanelProps {
   // Library browsing (and catalog IC-LoRA generation in general) is local-only.
   isLocalMode?: boolean
   onBrowseLibrary?: () => void
+  /** Header button that returns to the Create gallery. */
+  onBackToCreate?: () => void
   conditioningType?: ICLoraConditioningType
   onConditioningTypeChange?: (type: ICLoraConditioningType) => void
   conditioningStrength?: number
@@ -90,6 +92,7 @@ export function ICLoraPanel({
   onOutpaintPadsChange,
   isLocalMode = false,
   onBrowseLibrary,
+  onBackToCreate,
   conditioningType: conditioningTypeProp,
   onConditioningTypeChange,
   conditioningStrength: conditioningStrengthProp,
@@ -479,6 +482,16 @@ export function ICLoraPanel({
     <div className={`bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden flex flex-col ${fillHeight ? 'h-full min-h-0' : ''}`}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
         <div className="flex items-center gap-2">
+          {onBackToCreate && (
+            <button
+              type="button"
+              onClick={onBackToCreate}
+              title="Leave IC-LoRA and return to your Create gallery"
+              className="mr-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-semibold transition-colors"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" /> Back to Create
+            </button>
+          )}
           <Sparkles className="h-4 w-4 text-amber-400" />
           <span className="text-sm font-semibold text-white">IC-LoRA / Style Transfer</span>
         </div>
@@ -521,10 +534,10 @@ export function ICLoraPanel({
                 <AlertCircle className="h-4 w-4 text-amber-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-white">Built-in control needs LTX 2.3</h3>
+                <h3 className="text-sm font-semibold text-white">Choose an IC-LoRA</h3>
                 <p className="text-xs text-zinc-400 mt-1">
-                  Depth and canny Union Control are not available on the active LTX 2.5 model.
-                  Switch to an LTX 2.3 local model in Settings, or use a custom / catalog IC-LoRA.
+                  Pick one from the menu under the prompt box. If the menu is empty, use Browse
+                  IC-LoRAs to download one.
                 </p>
               </div>
             </div>

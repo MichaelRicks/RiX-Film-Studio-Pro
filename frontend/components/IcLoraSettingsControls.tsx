@@ -52,6 +52,8 @@ export interface IcLoraControlsProps {
   onIcLoraFpsChange?: (fps: number | null) => void
   isCatalogIcLora?: boolean
   advancedIcLoraControls?: boolean
+  // True when the IC-LoRA's input is a video, so there is a soundtrack for audio mode "source".
+  icLoraSourceAudioAvailable?: boolean
   // Catalog-declared controls for the selected IC-LoRA, rendered generically by id + kind.
   controls?: CatalogControl[]
   controlValues?: Record<string, number | string>
@@ -86,7 +88,7 @@ export function IcLoraSettingsControls({
               options={icLoraSelectorOptions ?? []}
               trigger={
                 <>
-                  <span className="text-zinc-300 font-medium">{(icLoraSelectorOptions ?? []).find(o => o.value === icLoraSelectorValue)?.label ?? 'Canny Edges'}</span>
+                  <span className="text-zinc-300 font-medium">{(icLoraSelectorOptions ?? []).find(o => o.value === icLoraSelectorValue)?.label ?? 'Select IC-LoRA'}</span>
                   <ChevronUp className="h-3 w-3 text-zinc-500" />
                 </>
               }

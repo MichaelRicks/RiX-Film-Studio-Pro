@@ -5,7 +5,7 @@ import {
   Heart, Film, Volume2, VolumeX, Sparkles, Sparkle,
   Clock, Monitor, ChevronUp, Scissors, Music, Undo2, Redo2, Loader2,
   ChevronLeft, ChevronRight, Copy, Check, Tag, Eraser, Square, MoveHorizontal, Wand2, Rows3, RefreshCw, Clapperboard,
-  CheckSquare, Lock, Dices, History, Shuffle, RectangleVertical, ListPlus, BookmarkPlus,
+  CheckSquare, Lock, Dices, History, Shuffle, RectangleVertical, ListPlus, BookmarkPlus, SlidersHorizontal,
 } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import type { GenSpaceRetakeSource } from '../contexts/ProjectContext'
@@ -889,6 +889,7 @@ function PromptBar({
   onEnhanceProviderChange,
   onPromptWithClaude,
   onSavePrompt,
+  advancedToggle,
   canUndoPrompt,
   onUndoPrompt,
   canRedoPrompt,
@@ -973,6 +974,8 @@ function PromptBar({
   onEnhanceProviderChange?: (provider: 'local' | 'api') => void
   onPromptWithClaude?: () => void
   onSavePrompt?: () => void
+  /** IC-LoRA mode: shows or hides the Advanced settings box. `changed` marks non-default values. */
+  advancedToggle?: { open: boolean; changed: boolean; onToggle: () => void }
   canUndoPrompt?: boolean
   onUndoPrompt?: () => void
   canRedoPrompt?: boolean
@@ -1768,6 +1771,22 @@ function PromptBar({
           </button>
         )}
 
+        {advancedToggle && (
+          <button
+            type="button"
+            onClick={advancedToggle.onToggle}
+            aria-pressed={advancedToggle.open}
+            title={`${advancedToggle.open ? 'Hide' : 'Show'} the advanced IC-LoRA settings${advancedToggle.changed ? ' (some are changed from the defaults and still apply)' : ''}`}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium flex-shrink-0 ${
+              advancedToggle.open ? 'bg-zinc-800 text-white' : 'text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Advanced
+            {advancedToggle.changed && <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
+          </button>
+        )}
+
         {/* Save the current prompt to a Prompt Manager folder (same dialog Claude's prompts use). */}
         {onSavePrompt && (
           <button
@@ -2331,7 +2350,8 @@ export function GenSpace() {
 
   // IC-LoRA mode: a downloadable curated IC-LoRA that resolves its own weights and builds
   // the control video server-side. When an IC-LoRA is selected, it supersedes canny/depth/custom.
-  const { enableMultipleKeyframesVideos, advancedIcLoraControls } = useDevFlags().flags
+  const { flags: devFlags, setFlag: setDevFlag } = useDevFlags()
+  const { enableMultipleKeyframesVideos, advancedIcLoraControls } = devFlags
   const canUseMultiKeyframe = canUseMultiKeyframeMode({
     isLocalMode,
     localCaps,
@@ -2422,21 +2442,46 @@ export function GenSpace() {
   //  - Only the *dropdown* sets the flag. The gallery's "IC-LoRA" button on a video enters
   //    ic-lora mode (canny/depth on that clip) via a different path, so it's left alone.
   const wantIcLoraDefaultRef = useRef(false)
+  // "Back to Create" in the IC-LoRA panel returns to whichever gallery mode was used last.
+  const lastLibraryModeRef = useRef<'video' | 'image'>('video')
+  if (mode === 'video' || mode === 'image') lastLibraryModeRef.current = mode
+  // The Ingredients button on Create also opens the download list when Ingredients isn't installed.
+  const showIngredientsDownloadRef = useRef(false)
+  // The IC-LoRA panel's loaded input (mirrored below), so it survives leaving the mode.
+  const icLoraInputPathRef = useRef<string | null>(null)
   const handleGenSpaceModeChange = useCallback((next: GenSpaceMode) => {
     if (next === 'ic-lora' && mode !== 'ic-lora') wantIcLoraDefaultRef.current = true
+    // The panel unmounts on the way out: hand it the loaded sheet or video again on return.
+    if (mode === 'ic-lora' && next !== 'ic-lora') setIcLoraInitial({ videoPath: icLoraInputPathRef.current })
     setMode(next)
   }, [mode])
+  const openIngredients = () => {
+    showIngredientsDownloadRef.current = true
+    handleGenSpaceModeChange('ic-lora')
+  }
   useEffect(() => {
-    if (mode !== 'ic-lora') { wantIcLoraDefaultRef.current = false; return }
+    if (mode !== 'ic-lora') {
+      wantIcLoraDefaultRef.current = false
+      showIngredientsDownloadRef.current = false
+      return
+    }
     if (!wantIcLoraDefaultRef.current) return
     const item = icLoras.find(r => r.ic_lora.id === DEFAULT_IC_LORA_ID)
     const meta = icLoraItems.find(e => e.id === DEFAULT_IC_LORA_ID)
-    if (!item || !meta?.downloaded) return // wait for the catalog to load; skip if not downloaded
+    if (!item || !meta) return // wait for the catalog to load
+    if (!meta.downloaded) {
+      if (showIngredientsDownloadRef.current) {
+        showIngredientsDownloadRef.current = false
+        setLibraryModalOpen(true)
+      }
+      return // select it once it has been downloaded
+    }
     wantIcLoraDefaultRef.current = false
+    showIngredientsDownloadRef.current = false
     // Applies the catalog default_settings (Stage 2 off, LoRA-in-S2, res ×2, strength 1.4) via
     // onSelectIcLora — no separate settings step needed here.
     selectIcLora(item)
-  }, [mode, icLoras, icLoraItems, selectIcLora])
+  }, [mode, icLoras, icLoraItems, selectIcLora, setLibraryModalOpen])
   const hasPositionCanvas = (selectedIcLora?.controls ?? []).some(c => c.kind === 'position_canvas')
   // Catalog IC-LoRAs may opt into promptless generation (e.g. outpainting fills from the scene).
   const promptOptional = isCatalogIcLora && (selectedIcLora?.allows_empty_prompt ?? false)
@@ -2547,6 +2592,7 @@ export function GenSpace() {
     width: 0,
     height: 0,
   })
+  icLoraInputPathRef.current = icLoraInput.videoPath
   // Resolution tiers for the use_lora_in_stage_2 two-stage path (mirrors retake/extend).
   const [icLoraResolutionKey, setIcLoraResolutionKey] = useState('original')
   const icLoraResolutionOpts = useMemo(
@@ -2574,7 +2620,20 @@ export function GenSpace() {
   // Unified IC-LoRA selector: one dropdown drives canny/depth, downloaded catalog
   // IC-LoRAs (one option per installed variant) and custom. selectedIcLoraId +
   // selectedIcLoraVariantId + icLoraCondType remain the underlying state.
-  const icLoraSelectorOptions = buildIcLoraSelectorOptions(icLoraItems, CONDITIONING_TYPES, {
+  // Canny and Depth only work when the active local model supports built-in control (LTX 2.3, not
+  // 2.5), so they leave the menu when it doesn't. Asked again whenever the model specs reload.
+  const [builtinControlSupported, setBuiltinControlSupported] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    void ApiClient.getLtxIcLoraRecommendation().then((r) => {
+      if (alive && r.ok) setBuiltinControlSupported(r.data.supported)
+    })
+    return () => { alive = false }
+  }, [videoGenerationModelSpecsResponse])
+  const conditioningTypes = builtinControlSupported === false
+    ? CONDITIONING_TYPES.filter(t => t.value === 'custom')
+    : CONDITIONING_TYPES
+  const icLoraSelectorOptions = buildIcLoraSelectorOptions(icLoraItems, conditioningTypes, {
     includeCatalog: true,
     includeCustom: isCustomIcLoraEnabled,
   })
@@ -3831,7 +3890,7 @@ export function GenSpace() {
               icLoraId: selectedIcLora.id,
               variantId: selectedIcLoraVariantId ?? undefined,
               controlValues,
-              loraStrength: advancedIcLoraControls ? icLoraLoraStrength : undefined,
+              loraStrength: icLoraLoraStrength,
               seed: appSettings.seedLocked ? appSettings.lockedSeed : undefined,
             },
             input: {
@@ -3853,20 +3912,17 @@ export function GenSpace() {
             outpaintPads: hasPositionCanvas ? outpaintPads : undefined,
             allowEmptyPrompt: promptOptional,
             referenceImagePath: icLoraInput.referenceImagePath ?? undefined,
-            // v1 backend reads the IC-LoRA's default_settings; overrides are sent only when the
-            // advanced flag is on. _resolve_settings applies skipStage2/resolutionFactor/audioMode/
-            // loraStrength server-side; fpsOverride is the exception — sent but ignored on the catalog path.
-            ...(advancedIcLoraControls
-              ? {
-                  skipStage2: icLoraSkipStage2,
-                  useLoraInStage2: icLoraUseLoraInStage2,
-                  resolution: resolveResolution(icLoraResolutionOpts, icLoraResolutionKey),
-                  resolutionFactor: icLoraResolutionFactor,
-                  audioMode: icLoraAudioMode,
-                  loraStrength: icLoraLoraStrength,
-                  fpsOverride: icLoraFps ?? undefined,
-                }
-              : {}),
+            // These start at the IC-LoRA's default_settings (see onSelectIcLora) and are always
+            // sent: the LORA slider is always on screen, and hiding the Advanced box must not change
+            // a run. _resolve_settings applies them server-side; fpsOverride is the exception — sent
+            // but ignored on the catalog path.
+            skipStage2: icLoraSkipStage2,
+            useLoraInStage2: icLoraUseLoraInStage2,
+            resolution: resolveResolution(icLoraResolutionOpts, icLoraResolutionKey),
+            resolutionFactor: icLoraResolutionFactor,
+            audioMode: icLoraAudioMode,
+            loraStrength: icLoraLoraStrength,
+            fpsOverride: icLoraFps ?? undefined,
           })
         })
         return
@@ -4708,6 +4764,8 @@ export function GenSpace() {
     onIcLoraFpsChange: setIcLoraFps,
     isCatalogIcLora,
     advancedIcLoraControls,
+    // Canny/depth/custom always run on a video; a catalog IC-LoRA says what its input is.
+    icLoraSourceAudioAvailable: !selectedIcLora || selectedIcLora.input?.kind === 'video',
     controls: selectedIcLora?.controls ?? [],
     controlValues,
     onControlChange,
@@ -5114,6 +5172,7 @@ export function GenSpace() {
             onOutpaintPadsChange={setOutpaintPads}
             isLocalMode={isLocalMode}
             onBrowseLibrary={() => setLibraryModalOpen(true)}
+            onBackToCreate={() => handleGenSpaceModeChange(lastLibraryModeRef.current)}
             conditioningType={icLoraCondType}
             onConditioningTypeChange={handleIcLoraCondTypeChange}
             conditioningStrength={icLoraStrength}
@@ -5239,6 +5298,21 @@ export function GenSpace() {
           />
         )}
 
+        {/* One-click way into Ingredients, which is otherwise tucked inside the mode menu. */}
+        {(mode === 'video' || mode === 'image') && canUseIcLora && (
+          <div className="mb-2 flex justify-start">
+            <button
+              type="button"
+              onClick={openIngredients}
+              title="Make a video that keeps your character, props and location from a reference sheet"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[rgb(var(--accent)/0.6)] bg-zinc-900 hover:bg-zinc-800 text-xs font-semibold text-white shadow-lg transition-colors"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+              Ingredients: use a reference sheet
+            </button>
+          </div>
+        )}
+
         {/* Prompt bar */}
         <PromptBar
           mode={mode}
@@ -5262,6 +5336,22 @@ export function GenSpace() {
           onPromptWithClaude={mode === 'video' || isIngredientsMode
             ? () => setPromptWithClaudeOpen(true)
             : mode === 'image' ? () => setSheetMakerOpen(true) : undefined}
+          advancedToggle={mode === 'ic-lora' && !forceApiGenerations ? {
+            open: advancedIcLoraControls,
+            // Only the box's own settings count; the LORA slider is always visible.
+            changed: (() => {
+              const d = selectedIcLora?.default_settings
+              // A setting that is hidden because it does nothing for this run doesn't count.
+              const sourceAudioIgnored = icLoraAudioMode === 'source' && selectedIcLora != null && selectedIcLora.input?.kind !== 'video'
+              return icLoraSkipStage2 !== (d?.skip_stage_2 ?? false)
+                || (!icLoraSkipStage2 && icLoraUseLoraInStage2 !== (d?.use_lora_in_stage_2 ?? false))
+                || (icLoraSkipStage2 && icLoraResolutionFactor !== (d?.resolution_factor ?? 2.0))
+                || (!sourceAudioIgnored && icLoraAudioMode !== (d?.audio_mode ?? 'generated'))
+                || (!isCatalogIcLora && icLoraFps !== null)
+                || (!icLoraSkipStage2 && icLoraUseLoraInStage2 && icLoraResolutionKey !== 'original')
+            })(),
+            onToggle: () => setDevFlag('advancedIcLoraControls', !advancedIcLoraControls),
+          } : undefined}
           onSavePrompt={() => {
             // In IC-LoRA mode the picture is the IC-LoRA input (an Ingredients sheet, say): it is the
             // thumbnail only, never a first frame. A video input has no thumbnail.

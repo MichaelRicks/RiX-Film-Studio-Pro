@@ -21,7 +21,7 @@ export const DEV_FLAGS: DevFlagSpec[] = [
   {
     key: 'advancedIcLoraControls',
     label: 'Advanced IC-LoRA controls',
-    description: 'Expose all IC-LoRA settings (skip stage 2, resolution factor, audio, strengths) for catalog and custom modes. Off by default — settings use the catalog IC-LoRA defaults.',
+    description: 'Show the Advanced IC-LoRA settings box (stage 2, resolution factor, audio, FPS). Same switch as the Advanced button under the prompt box. Hiding the box does not reset its values.',
   },
   {
     key: 'enableMultipleKeyframesVideos',
