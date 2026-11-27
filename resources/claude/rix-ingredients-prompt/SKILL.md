@@ -126,8 +126,21 @@ dropped or smeared. `Generated video:` stays one paragraph. Each shot
 repeats the character, key prop and place in one short clause using the same words. Every cut is a
 hard cut, written "Hard cut to..." followed by the new framing (scale, angle, who is in frame).
 Never write dissolve, fade, blend, morph or "transitions to". Change both shot scale and camera
-angle at each cut, and end each shot on a still, held moment. No "Shot 1:" labels. Open on a medium
-shot that shows both character and place.
+angle at each cut. No "Shot 1:" labels. Open on a medium shot that shows both character and place.
+
+- **Name the character in every shot; pronouns give the model nothing to hold onto.** Make one
+  short identity phrase from wording already under `Reference sheet:` ("the same woman in the same
+  scarlet gown") and use it, word for word, as the first mention in every later shot, close-ups of a
+  face or hand included. Never let "she", "he", "they", "her face" or "his hand" introduce the
+  character. Weak: "her face turns into the light." Better: "the face of the same woman in the same
+  scarlet gown turns into the light."
+- **Carry the action through the cut.** When something is already happening, say that the cut
+  continues it and restate the action at the same pace and in the same direction. Weak: "Hard cut to
+  a close-up of her face." Better: "Hard cut to a close-up from the side that continues the walk:
+  the same woman in the same scarlet gown walks on at the same slow pace." Keep it as small as the
+  anatomy rules allow. If nothing is in motion, carry the held pose, gaze or sound across.
+- Unless an action is being carried through a cut, end the shot on a still, held moment. The last
+  shot always ends on one.
 
 ## Dialogue
 Keep lines short and in quotes. Describe the voice once, then reuse the description. An off-screen

@@ -41,13 +41,33 @@ from the words, not from the image. At each cut repeat the identifying details (
 clothing, the one or two props, the lighting and the setting) in the same words as shot 1. This is
 the single biggest factor in consistency.
 
+**Name the subject in every shot. Pronouns give the model nothing to hold onto.** Give each
+character one short fixed identity phrase from shot 1 ("the same woman in the same scarlet gown")
+and use it, word for word, as the first mention in every later shot, before the other repeated
+details. Never let "she", "he", "they", "her face" or "his hand" be what introduces a character in a
+shot, including in close-ups of a face or hand. A pronoun is fine only later in the same sentence,
+when one character is in view. With two characters, give each a clearly different phrase and use the
+phrases instead of pronouns.
+Weak: "...her face turns into the light."
+Better: "...the face of the same woman in the same scarlet gown turns into the light."
+
+**Carry the action through the cut.** When something is already happening (a walk, a pour, a slow
+head turn), the next shot continues it in the new framing: say that the cut continues it, then
+restate the action at the same pace and in the same direction. Don't just name the new framing.
+Weak: "Hard cut to a close-up of her face."
+Better: "Hard cut to a close-up from the side that continues the walk: the same woman in the same
+scarlet gown walks on at the same slow pace."
+Keep the carried action as small and simple as the anatomy rule below requires. If nothing is in
+motion, carry the held pose, gaze or sound across instead of inventing movement.
+
 **Every cut is a hard cut.** Write each one as an instant cut, in these words: "Hard cut to
 [the new framing]..." or "The view cuts instantly to...". Never write dissolve, fade, blend, morph,
 "transitions to" or "slowly becomes": the model renders those as soft cross-dissolves. Make every
 cut an obvious jump so there is nothing to blend: change the shot scale AND the camera angle at
-each cut (wide to close-up, front to side or from behind), and end the shot before it on a still,
-held moment. Use a dissolve only when the user asks for one. Then restate the new framing: shot
-scale, camera angle, who is in frame, and the light if it changed.
+each cut (wide to close-up, front to side or from behind). Unless an action is being carried through
+the cut, end the shot before it on a still, held moment. Use a dissolve only when the user asks for
+one. Then restate the new framing: shot scale, camera angle, who is in frame, and the light if it
+changed.
 
 **Audio.** Say what is heard in shot 1 and carry it across every cut ("the low hum continues").
 Dialogue: keep each line short, quote it, and describe the voice once ("in a thin, cracked
@@ -117,15 +137,19 @@ behind. Idea: she wakes the orb.
 > forward in a dim, hazy room to study a glowing glass orb held at the lower right of the frame, a
 > single warm lamp glowing softly in the dark background, drifting dust in the air. Her eyes widen
 > slightly as the orb's blue light flickers across her face, and she whispers in a thin, cracked
-> voice, "There you are." A low, ominous hum underlies the scene. Hard cut to an
-> extreme close-up of the orb itself, same dim room and same warm lamp glow blurred behind it,
-> swirling blue and amber specks moving inside the glass as her wrinkled hand hovers just beside
-> it, the same low hum continuing. The view cuts instantly to a wide shot from behind and above of the same
-> elderly woman, same long grey-streaked light-brown hair and black knit garment, hunched over the
-> glowing orb in the center of the dark room, the single warm lamp still visible at the far wall,
-> the orb's blue light spilling across the floor as the hum swells and her thin, cracked voice
-> murmurs, "Show me."
+> voice, "There you are." A low, ominous hum underlies the scene. Hard cut to an extreme close-up
+> from the side that continues the study of the orb: the wrinkled hand of the same elderly woman in
+> the same black knit garment rests still beside the glass, a lock of the same long grey-streaked
+> light-brown hair at the edge of the frame, swirling blue and amber specks moving inside the orb,
+> the same dim room and warm lamp glow blurred behind, the same low hum continuing. The view cuts
+> instantly to a wide shot from behind and above that continues the same still lean over the orb:
+> the same elderly woman in the same black knit garment, with the same long grey-streaked
+> light-brown hair, bends toward the glowing orb in the center of the dark room, the single warm
+> lamp still visible at the far wall, the orb's blue light spilling across the floor as the hum
+> swells and the same thin, cracked voice murmurs, "Show me."
 
-Note how shot 1 is the image, and the second and third shots repeat her hair, clothing, the lamp
-and the hum. Each cut jumps scale and angle (medium close-up, extreme close-up, wide from behind and
-above), and each line of dialogue sits in its own shot.
+Note how shot 1 is the image, and the second and third shots name the same elderly woman in the same
+black knit garment before anything else about her, then repeat the hair, the lamp and the hum. Each
+cut carries on what was already happening (studying the orb, leaning over it), jumps scale and angle
+(medium close-up, extreme close-up from the side, wide from behind and above), and each line of
+dialogue sits in its own shot.
