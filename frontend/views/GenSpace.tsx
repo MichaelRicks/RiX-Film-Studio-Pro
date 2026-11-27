@@ -893,6 +893,7 @@ function PromptBar({
   onPromptWithClaude,
   onSavePrompt,
   advancedToggle,
+  dfrToggle,
   canUndoPrompt,
   onUndoPrompt,
   canRedoPrompt,
@@ -979,6 +980,8 @@ function PromptBar({
   onSavePrompt?: () => void
   /** IC-LoRA mode: shows or hides the Advanced settings box. `changed` marks non-default values. */
   advancedToggle?: { open: boolean; changed: boolean; onToggle: () => void }
+  /** Video mode, local only. `blockedReason` disables the switch and says why. */
+  dfrToggle?: { on: boolean; blockedReason: string | null; onToggle: () => void }
   canUndoPrompt?: boolean
   onUndoPrompt?: () => void
   canRedoPrompt?: boolean
@@ -1751,6 +1754,24 @@ function PromptBar({
                     catalogIdsByPath={loraCatalogIdsByPath}
                   />
                 )}
+
+                {dfrToggle && (
+                  <button
+                    type="button"
+                    onClick={dfrToggle.onToggle}
+                    disabled={dfrToggle.blockedReason !== null}
+                    aria-pressed={dfrToggle.on && dfrToggle.blockedReason === null}
+                    title={dfrToggle.blockedReason ?? 'DFR detail pass: sharper detail, longer render'}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed ${
+                      dfrToggle.on && dfrToggle.blockedReason === null
+                        ? 'bg-[rgb(var(--accent)/0.25)] text-white ring-1 ring-[rgb(var(--accent)/0.6)]'
+                        : 'text-zinc-300 hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    DFR {dfrToggle.on && dfrToggle.blockedReason === null ? 'On' : 'Off'}
+                  </button>
+                )}
               </>
             ) : (
               <div className="px-2 py-1.5 rounded-md bg-zinc-800/60 text-zinc-500 text-xs">
@@ -2259,6 +2280,15 @@ export function GenSpace() {
     keyframes?: KeyframeItem[]
   } | null>(null)
   const [settings, setSettings] = useState(() => ({ ...DEFAULT_VIDEO_SETTINGS }))
+  // DFR detail pass: remembered across projects and restarts, off until switched on.
+  const [dfrEnabled, setDfrEnabled] = useState(() => {
+    try { return localStorage.getItem('genspace.useDfr') === 'true' } catch { return false }
+  })
+  const toggleDfr = () => {
+    const next = !dfrEnabled
+    setDfrEnabled(next)
+    try { localStorage.setItem('genspace.useDfr', String(next)) } catch { /* convenience only */ }
+  }
   const continuationPendingRef = useRef(false)
   const continuationProcessedRef = useRef<string | null>(null)
   // The seed frame (source clip's last frame) for the pending continuation, used to
@@ -2280,11 +2310,20 @@ export function GenSpace() {
     }),
     [videoGenerationModelSpecsResponse, shouldVideoGenerateWithLtxApi],
   )
+  const dfrAvailable = Boolean(videoGenerationModelSpecsResponse?.dfr_available)
   const videoSettingsMessage = isLoadingVideoGenerationModelSpecs
     ? 'Loading generation settings...'
     : videoGenerationModelSpecsErrorMessage
       ? `Could not load generation settings: ${videoGenerationModelSpecsErrorMessage}`
       : null
+  const dfrBlockedReason = !dfrAvailable
+    ? 'DFR needs LTX 2.5 and its detail LoRA in the ltx-2.5 models folder (restart RiX after adding it)'
+    : inputAudio
+      ? 'DFR does not work with input audio yet'
+      : inputImage && inputLastImage
+        ? 'DFR does not work with a last frame yet'
+        : null
+
   const sanitizeVideoSettings = useCallback(
     (
       next: typeof settings,
@@ -3134,6 +3173,7 @@ export function GenSpace() {
             keyframes: usedKeyframes && usedKeyframes.length > 0
               ? toPersistedKeyframes(usedKeyframes)
               : undefined,
+            useDfr: usedSettings.useDfr,
             loras: usedSettings.loras && usedSettings.loras.length > 0
               ? usedSettings.loras.map(l => ({ ...l, ref: toModelsDirRelativeRef(l.ref, appSettings.modelsDir) }))
               : undefined,
@@ -4111,6 +4151,8 @@ export function GenSpace() {
       const videoSettings = sanitizeVideoSettings(settings)
       if (!videoSettings) return
       const lastImagePath = imagePath && videoSettings.duration != null ? inputLastImage : null
+      const useDfr = mode === 'video' && dfrEnabled && dfrBlockedReason === null
+        && !audioPath && !lastImagePath
       const genSettings: GenerationSettings = {
           ...videoSettings,
           model: videoSettings.model as VideoGenerationPipeline,
@@ -4122,8 +4164,11 @@ export function GenSpace() {
           loras: mode !== 'multi-keyframe' && canUseUserLoras && selectedLoras.length > 0
             ? selectedLoras
             : undefined,
+          useDfr: useDfr || undefined,
       }
-      const modelLabel = resolvePipelineDisplayName(videoModelSpecs, genSettings.model) ?? undefined
+      const baseModelLabel = resolvePipelineDisplayName(videoModelSpecs, genSettings.model) ?? undefined
+      // Shown on the clip, so DFR and non-DFR renders can be told apart.
+      const modelLabel = useDfr && baseModelLabel ? `${baseModelLabel} + DFR` : baseModelLabel
       // "Continue as new shot" arms these for the next Generate click. Take them now, so a
       // job that is already running cannot consume them, and hand them to this job's run.
       const continuation = {
@@ -5403,6 +5448,9 @@ export function GenSpace() {
           canUseExtend={canUseExtend}
           canUseUserLoras={canUseUserLoras}
           loraCatalogIdsByPath={loraDisplayNames}
+          dfrToggle={mode === 'video' && !shouldVideoGenerateWithLtxApi
+            ? { on: dfrEnabled, blockedReason: dfrBlockedReason, onToggle: toggleDfr }
+            : undefined}
           imageUsesFalApi={shouldImageGenerateWithFalApi}
           enhanceAvailableForMode={enhanceAvailableForMode}
           canEnhancePrompt={canEnhancePrompt}

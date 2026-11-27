@@ -44,7 +44,11 @@ from handlers.generation_handler import GenerationHandler
 from handlers.pipelines_handler import PipelinesHandler
 from handlers.prompt_enhancement_handler import PromptEnhancementHandler
 from handlers.text_handler import TextHandler
-from runtime_config.model_download_specs import is_duration_head_ready, resolve_active_ltx_model_id
+from runtime_config.model_download_specs import (
+    find_dfr_detail_lora,
+    is_duration_head_ready,
+    resolve_active_ltx_model_id,
+)
 from server_utils.media_validation import (
     normalize_optional_path,
     validate_audio_file,
@@ -178,7 +182,32 @@ class VideoGenerationHandler(StateHandlerBase):
         return build_generate_video_model_specs_response(
             local_model_id=self._active_ltx_model_id(),
             duration_head_ready=self._duration_head_ready(),
+            dfr_available=find_dfr_detail_lora(self.models_dir, self._active_ltx_model_id()) is not None,
         )
+
+    def _resolve_dfr_lora(self, req: GenerateVideoRequest, *, use_api_specs: bool) -> str | None:
+        """Detail LoRA path for a DFR request, or None when DFR is off. Never falls back."""
+        if not req.useDfr:
+            return None
+        if (
+            use_api_specs
+            or req.keyframes
+            or normalize_optional_path(req.audioPath)
+            or normalize_optional_path(req.lastImagePath)
+        ):
+            raise HTTPError(
+                422,
+                "DFR works only with local text-to-video or a single start image. Turn DFR off.",
+                code="UNSUPPORTED_DFR_INPUTS",
+            )
+        path = find_dfr_detail_lora(self.models_dir, self._active_ltx_model_id())
+        if path is None:
+            raise HTTPError(
+                409,
+                "DFR needs LTX 2.5 and its detail LoRA in the ltx-2.5 models folder. Turn DFR off.",
+                code="DFR_NOT_AVAILABLE",
+            )
+        return str(path)
 
     def generate(self, req: GenerateVideoRequest) -> GenerateVideoResponse:
         use_api_specs = should_video_generate_with_ltx_api(
@@ -193,6 +222,8 @@ class VideoGenerationHandler(StateHandlerBase):
         )
         if validation_error is not None:
             raise HTTPError(422, validation_error, code="INVALID_VIDEO_GENERATION_SPEC")
+
+        dfr_lora_path = self._resolve_dfr_lora(req, use_api_specs=use_api_specs)
 
         if use_api_specs:
             return self._generate_forced_api(req)
@@ -307,6 +338,7 @@ class VideoGenerationHandler(StateHandlerBase):
                     camera_motion=req.cameraMotion,
                     negative_prompt=req.negativePrompt,
                     loras=loras,
+                    dfr_lora_path=dfr_lora_path,
                 )
 
                 self._generation.complete_generation(output_path)
@@ -354,6 +386,7 @@ class VideoGenerationHandler(StateHandlerBase):
         loras: list[tuple[str, float]] | None = None,
         last_image: Image.Image | None = None,
         keyframe_images: list[tuple[Image.Image, int, float]] | None = None,
+        dfr_lora_path: str | None = None,
     ) -> str:
         t_total_start = time.perf_counter()
         gen_mode = "keyframes" if keyframe_images else "i2v" if image is not None else "t2v"
@@ -363,6 +396,8 @@ class VideoGenerationHandler(StateHandlerBase):
             else f"{num_frames} frames"
         )
         logger.info("[%s] Generation started (model=fast, %dx%d, %s, %d fps)", gen_mode, width, height, frames_log, int(fps))
+        if dfr_lora_path is not None:
+            logger.info("[%s] DFR detail pass on", gen_mode)
 
         self._generation.raise_if_cancelled()
 
@@ -416,6 +451,7 @@ class VideoGenerationHandler(StateHandlerBase):
                     images=images,
                     output_path=str(output_path),
                     guide_all_images=bool(keyframe_images),
+                    dfr_lora_path=dfr_lora_path,
                 )
             t_inference_end = time.perf_counter()
             logger.info("[%s] Inference: %.2fs", gen_mode, t_inference_end - t_inference_start)

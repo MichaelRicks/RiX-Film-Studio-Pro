@@ -1115,6 +1115,11 @@ export interface components {
         GenerateVideoModelsSpecsResponse: {
             /** Api Models */
             api_models: components["schemas"]["LTXVideoGenerationModelSpecItem"][];
+            /**
+             * Dfr Available
+             * @default false
+             */
+            dfr_available: boolean;
             /** Local Models */
             local_models: components["schemas"]["LTXVideoGenerationModelSpecItem"][];
         };
@@ -1179,6 +1184,11 @@ export interface components {
             resolution: "540p" | "720p" | "1080p" | "1440p" | "2160p";
             /** Seed */
             seed?: number | null;
+            /**
+             * Usedfr
+             * @default false
+             */
+            useDfr: boolean;
         };
         /** GenerationProgressResponse */
         GenerationProgressResponse: {

@@ -274,6 +274,9 @@ export function useGeneration(): UseGenerationReturn {
         if (audioPath) {
           body.audioPath = audioPath
         }
+        if (settings.useDfr) {
+          body.useDfr = true
+        }
         if (settings.loras?.length) {
           body.loras = settings.loras.map(l => ({ ref: l.ref, scale: l.scale }))
         }

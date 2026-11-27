@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 # 2.5.1 patches use new filenames in the same dir — not a nested ltx-2.5.1/.
 LTX_2_5_FAMILY_DIR = Path("ltx-2.5")
 
+# FORK: DFR detail LoRA. Gated, in its own Hugging Face repo
+# (Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler). Placed by hand for now,
+# so it is not a ModelCheckpointID and never counts as a required download.
+DFR_DETAIL_LORA_FILENAME = "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors"
+_DFR_LTX_MODEL_ID: LTXLocalModelId = "ltx-2.5-22b-distilled"
+
 ALL_MODEL_CP_IDS = cast(tuple[ModelCheckpointID, ...], get_args(ModelCheckpointID))
 ALL_LTX_LOCAL_MODEL_IDS = cast(tuple[LTXLocalModelId, ...], get_args(LTXLocalModelId))
 
@@ -587,6 +593,14 @@ def is_duration_head_ready(models_dir: Path, model_id: LTXLocalModelId) -> bool:
     """True when this local offering has DurationHead weights on disk (required for Auto duration)."""
     spec = get_ltx_model_spec(model_id)
     return spec.duration_head_cp is not None and is_cp_downloaded(models_dir, spec.duration_head_cp)
+
+
+def find_dfr_detail_lora(models_dir: Path, model_id: LTXLocalModelId | None) -> Path | None:
+    """The DFR detail LoRA, if ``model_id`` can use it and the file is installed."""
+    if model_id != _DFR_LTX_MODEL_ID:
+        return None
+    path = models_dir / LTX_2_5_FAMILY_DIR / DFR_DETAIL_LORA_FILENAME
+    return path if path.is_file() else None
 
 
 def get_existing_cp_path(models_dir: Path, cp_id: ModelCheckpointID) -> Path:

@@ -727,6 +727,7 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
         output_path: str,
         *,
         guide_all_images: bool = False,
+        dfr_lora_path: str | None = None,
     ) -> None:
         payload = {
             "prompt": prompt,
@@ -738,6 +739,7 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
             "images": images,
             "output_path": output_path,
             "guide_all_images": guide_all_images,
+            "dfr_lora_path": dfr_lora_path,
         }
         if self.inference_steps:
             from services.generation_interrupt import raise_if_requested

@@ -198,12 +198,14 @@ def build_generate_video_model_specs_response(
     local_model_id: LTXLocalModelId | None = None,
     *,
     duration_head_ready: bool = False,
+    dfr_available: bool = False,
 ) -> GenerateVideoModelsSpecsResponse:
     return GenerateVideoModelsSpecsResponse(
         local_models=get_local_video_generation_model_specs(
             local_model_id, duration_head_ready=duration_head_ready
         ),
         api_models=get_api_video_generation_model_specs(),
+        dfr_available=dfr_available,
     )
 
 

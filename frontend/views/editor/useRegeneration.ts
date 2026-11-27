@@ -322,6 +322,11 @@ export function useRegeneration(params: UseRegenerationParams) {
       imageSteps: generationParams.imageSteps || 4,
       // Local LoRA refs are filesystem paths the cloud API can't resolve.
       loras: !shouldVideoGenerateWithLtxApi ? generationParams.loras : undefined,
+      useDfr: !shouldVideoGenerateWithLtxApi
+        && (generationParams.mode === 'text-to-video' || generationParams.mode === 'image-to-video')
+        && !generationParams.inputLastImageUrl
+        ? generationParams.useDfr
+        : undefined,
     }
     void regenGenerate(
       generationParams.prompt,

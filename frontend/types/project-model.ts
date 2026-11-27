@@ -88,6 +88,8 @@ export const generationParamsSchema = z.object({
   inputLastImageUrl: z.string().optional(),
   inputAudioUrl: z.string().optional(),
   keyframes: z.array(persistedKeyframeSchema).optional(),
+  // Made with the DFR detail pass, so Regenerate uses it again.
+  useDfr: z.boolean().optional(),
   retakeVideoPath: z.string().optional(),
   retakeStartTime: z.number().optional(),
   retakeDuration: z.number().optional(),

@@ -1134,6 +1134,11 @@
             "title": "Api Models",
             "type": "array"
           },
+          "dfr_available": {
+            "default": false,
+            "title": "Dfr Available",
+            "type": "boolean"
+          },
           "local_models": {
             "items": {
               "$ref": "#/components/schemas/LTXVideoGenerationModelSpecItem"
@@ -1206,6 +1211,7 @@
                   10,
                   12,
                   14,
+                  15,
                   16,
                   18,
                   20
@@ -1309,6 +1315,11 @@
               }
             ],
             "title": "Seed"
+          },
+          "useDfr": {
+            "default": false,
+            "title": "Usedfr",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2710,6 +2721,7 @@
                   10,
                   12,
                   14,
+                  15,
                   16,
                   18,
                   20

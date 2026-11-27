@@ -429,6 +429,8 @@ class LTXVideoGenerationModelSpecItem(BaseModel):
 class GenerateVideoModelsSpecsResponse(BaseModel):
     local_models: list[LTXVideoGenerationModelSpecItem]
     api_models: list[LTXVideoGenerationModelSpecItem]
+    # FORK: the active local model can run DFR and its detail LoRA is on disk.
+    dfr_available: bool = False
 
 
 class InstalledModelResponse(BaseModel):
@@ -484,6 +486,8 @@ class GenerateVideoRequest(BaseModel):
     aspectRatio: Literal["16:9", "9:16", "21:9"] = "16:9"
     seed: int | None = None
     loras: list[LoraEntry] = Field(default_factory=list[LoraEntry])
+    # FORK: local DFR detail pass (text-to-video and single start image only).
+    useDfr: bool = False
 
 
 class GenerateImageRequest(BaseModel):

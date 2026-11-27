@@ -30,6 +30,8 @@ export interface GenerationSettings {
   cameraMotion: string
   aspectRatio?: string
   loras?: LoraSelection[]
+  /** Local DFR detail pass. Only set when the run's inputs support it. */
+  useDfr?: boolean
   // Image-specific settings
   imageResolution: string
   imageAspectRatio: string
