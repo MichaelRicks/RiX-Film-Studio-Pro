@@ -77,6 +77,9 @@ import { buildIcLoraSelectorOptions, encodeIcLoraSelectorValue, parseIcLoraSelec
 import { SettingsDropdown } from '../components/SettingsDropdown'
 import { IcLoraSettingsControls, type IcLoraControlsProps } from '../components/IcLoraSettingsControls'
 import { IcLoraAdvancedPanel } from '../components/IcLoraAdvancedPanel'
+import {
+  EMPTY_IC_LORA_OUTPUT, addOutputClip, followLiveRun, keepOutputClips, outputSelection, stepOutput,
+} from '../lib/ic-lora-output-history'
 import { FreeApiKeyBubble } from '../components/FreeApiKeyBubble'
 import { shouldShowLastFrameChip } from '../lib/genspace-last-frame'
 import {
@@ -2045,6 +2048,8 @@ const DEFAULT_VIDEO_SETTINGS = {
   imageVariation: 0,
 }
 
+const isImagePath = (path: string) => /\.(png|jpe?g|webp|bmp)$/i.test(path)
+
 // IC-LoRA layout, in px. The panel's limit is its 16px top padding, about 144px of header rows
 // and 520px of viewing area.
 const IC_LORA_PANEL_MAX_HEIGHT = 680
@@ -2617,6 +2622,13 @@ export function GenSpace() {
     height: 0,
   })
   icLoraInputPathRef.current = icLoraInput.videoPath
+  // Finished clips the Output panel can step through (see lib/ic-lora-output-history).
+  const [icLoraOutput, setIcLoraOutput] = useState(EMPTY_IC_LORA_OUTPUT)
+  useEffect(() => { setIcLoraOutput(EMPTY_IC_LORA_OUTPUT) }, [currentProjectId])
+  useEffect(() => {
+    const paths = new Set((activeProject?.assets ?? []).flatMap(a => [a.path, ...(a.takes ?? []).map(t => t.path)]))
+    setIcLoraOutput(h => keepOutputClips(h, paths))
+  }, [activeProject?.assets])
   // Resolution tiers for the use_lora_in_stage_2 two-stage path (mirrors retake/extend).
   const [icLoraResolutionKey, setIcLoraResolutionKey] = useState('original')
   const icLoraResolutionOpts = useMemo(
@@ -3405,6 +3417,9 @@ export function GenSpace() {
         return
       }
 
+      // Added in the same tick as the asset below, so the deleted-clip check sees both.
+      setIcLoraOutput(h => addOutputClip(h, { path: copied.path, renderMs: icLoraRenderMs }))
+
       if (activeIcLoraSource?.assetId) {
         const sourceAsset = activeProject?.assets?.find(a => a.id === activeIcLoraSource.assetId)
         if (sourceAsset) {
@@ -3889,6 +3904,7 @@ export function GenSpace() {
       await run()
     }
     if (!generationBusy) {
+      setIcLoraOutput(followLiveRun)
       await labelled()
       return
     }
@@ -4174,18 +4190,25 @@ export function GenSpace() {
   // click away — no re-picking the source image or retyping the prompt. The user
   // can tweak anything before hitting Generate; seed behaviour follows the
   // existing Lock Seed setting (unlocked = a fresh variation).
+  // Back into the IC-LoRA panel with a saved clip's input, IC-LoRA, settings and prompt.
+  const restoreIcLoraRecipe = useCallback((params: NonNullable<Asset['generationParams']>) => {
+    if (!params.icLoraVideoPath) return
+    setActiveRetakeSource(null)
+    setActiveIcLoraSource(null)
+    setMode('ic-lora')
+    setPrompt(params.prompt)
+    setIcLoraInitial({ videoPath: params.icLoraVideoPath })
+    setIcLoraPanelKey(prev => prev + 1)
+    // Clips saved before the IC-LoRA was recorded: a still-image input means Ingredients.
+    const icLoraId = params.icLoraId ?? (isImagePath(params.icLoraVideoPath) ? DEFAULT_IC_LORA_ID : undefined)
+    if (icLoraId) pendingIcLoraRegenRef.current = { ...params, icLoraId }
+    setIcLoraRegenTick(t => t + 1)
+  }, [])
+
   const handleRegenerate = useCallback(async (asset: Asset) => {
     const params = asset.generationParams
     if (params?.mode === 'ic-lora' && params.icLoraVideoPath) {
-      // Back into the IC-LoRA panel with the same input, IC-LoRA, settings and prompt.
-      setActiveRetakeSource(null)
-      setActiveIcLoraSource(null)
-      setMode('ic-lora')
-      setPrompt(params.prompt)
-      setIcLoraInitial({ videoPath: params.icLoraVideoPath })
-      setIcLoraPanelKey(prev => prev + 1)
-      if (params.icLoraId) pendingIcLoraRegenRef.current = params
-      setIcLoraRegenTick(t => t + 1)
+      restoreIcLoraRecipe(params)
       if (params.seed != null) updateAppSettings({ seedLocked: true, lockedSeed: params.seed })
       return null
     }
@@ -4432,12 +4455,20 @@ export function GenSpace() {
 
   const handleIcLora = useCallback((videoAsset: Asset) => {
     if (!canUseIcLora) return
+    // A clip made from a reference sheet reopens with that sheet and its prompt, ready for a new
+    // take (the seed setting is left alone; Regenerate is the one that repeats it). Any other
+    // video becomes the IC-LoRA's input.
+    const params = videoAsset.generationParams
+    if (params?.mode === 'ic-lora' && params.icLoraVideoPath && isImagePath(params.icLoraVideoPath)) {
+      restoreIcLoraRecipe(params)
+      return
+    }
     setMode('ic-lora')
     setPrompt('')
     setActiveIcLoraSource(null)
     setIcLoraInitial({ videoPath: videoAsset.path })
     setIcLoraPanelKey((prev) => prev + 1)
-  }, [forceApiGenerations, canUseIcLora])
+  }, [forceApiGenerations, canUseIcLora, restoreIcLoraRecipe])
 
   const isRetakeMode = mode === 'retake'
   const isExtendMode = mode === 'extend'
@@ -4794,6 +4825,8 @@ export function GenSpace() {
     controlValues,
     onControlChange,
   }
+
+  const icLoraShown = outputSelection(icLoraOutput, isIcLoraGenerating)
 
   const icLoraSpare = Math.max(
     0,
@@ -5211,7 +5244,11 @@ export function GenSpace() {
             onConditioningTypeChange={handleIcLoraCondTypeChange}
             conditioningStrength={icLoraStrength}
             onConditioningStrengthChange={setIcLoraStrength}
-            outputVideoPath={icLoraResult?.videoPath || null}
+            outputVideoPath={icLoraShown.clip?.path ?? null}
+            outputRenderMs={icLoraShown.clip?.renderMs}
+            outputPosition={{ index: icLoraShown.index, total: icLoraShown.total }}
+            onOutputStep={step => setIcLoraOutput(h => stepOutput(h, isIcLoraGenerating, step))}
+            onOutputClear={() => setIcLoraOutput(EMPTY_IC_LORA_OUTPUT)}
             elapsedMs={elapsedMs}
             onChange={setIcLoraInput}
           />

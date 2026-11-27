@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Upload, Loader2, Film, Sparkles, Image as ImageIcon,
-  RefreshCw, Download, AlertCircle, Trash2, Square, Clock, ArrowLeft,
+  RefreshCw, Download, AlertCircle, Square, Clock, ArrowLeft, ChevronLeft, ChevronRight, X, Trash2,
 } from 'lucide-react'
 import { ApiClient, type ApiRequestBodyOf, type ApiSuccessOf } from '../lib/api-client'
 import { logger } from '../lib/logger'
@@ -52,6 +52,13 @@ interface ICLoraPanelProps {
   conditioningStrength?: number
   onConditioningStrengthChange?: (strength: number) => void
   outputVideoPath?: string | null
+  /** Render time of the finished clip on screen. */
+  outputRenderMs?: number
+  /** Place among the finished clips, plus the live run while one is going. */
+  outputPosition?: { index: number; total: number }
+  onOutputStep?: (step: -1 | 1) => void
+  /** Empties the Output panel; the clips stay in the gallery. */
+  onOutputClear?: () => void
   // Render stopwatch (ms): ticks while processing, then holds the final time next to the output.
   elapsedMs?: number
   onChange?: (data: {
@@ -98,6 +105,10 @@ export function ICLoraPanel({
   conditioningStrength: conditioningStrengthProp,
   onConditioningStrengthChange,
   outputVideoPath: _outputVideoPath,
+  outputRenderMs,
+  outputPosition,
+  onOutputStep,
+  onOutputClear,
   elapsedMs = 0,
   onChange,
 }: ICLoraPanelProps) {
@@ -154,6 +165,10 @@ export function ICLoraPanel({
   useEffect(() => {
     if (prevInputKindRef.current === inputKind) return
     prevInputKindRef.current = inputKind
+    // An IC-LoRA can finish loading after the panel opens with its input already in place
+    // (Regenerate, a kept sheet): only an input of the wrong kind is cleared.
+    const isStill = /\.(png|jpe?g|webp|bmp)$/i.test(inputVideoPath ?? '')
+    if (inputVideoPath && isStill === (inputKind === 'image')) return
     setInputVideoPath(null)
     setInputTime(0)
     setSourceDims(null)
@@ -498,13 +513,6 @@ export function ICLoraPanel({
         {inputVideoUrl && (
           <div className="flex items-center gap-2">
             <button
-              onClick={handleClear}
-              className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
-              title="Clear video"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-            <button
               onClick={handleBrowse}
               className="p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
               title="Replace video"
@@ -630,13 +638,25 @@ export function ICLoraPanel({
                   {inputVideoPath.split(/[\\/]/).pop()}
                 </span>
               )}
-              <button
-                onClick={handleBrowse}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
-              >
-                <Upload className="h-3 w-3" />
-                Import
-              </button>
+              <div className="ml-auto flex items-center gap-1 shrink-0">
+                <button
+                  onClick={handleBrowse}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                >
+                  <Upload className="h-3 w-3" />
+                  Import
+                </button>
+                {inputVideoPath && (
+                  <button
+                    onClick={handleClear}
+                    title="Take this input out of the panel (the file is not deleted)"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-700 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
             <div
               className={`flex-1 min-h-0 bg-black flex items-center justify-center relative ${!inputVideoUrl ? 'border-2 border-dashed border-zinc-700 m-3 rounded-lg' : ''} ${isDragOver ? 'border-blue-500 bg-blue-500/10' : ''}`}
@@ -795,19 +815,96 @@ export function ICLoraPanel({
 
           {/* Output column */}
           <div className="flex-1 flex flex-col border-l border-zinc-800 min-w-0">
-            <div className="px-3 py-2 border-b border-zinc-800 flex items-center">
+            <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2">
               <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Output</span>
-              {(isProcessing || (_outputVideoPath && elapsedMs > 0)) && (
-                <span className="ml-auto flex items-center gap-1 text-[11px] font-mono tabular-nums text-zinc-400"
-                  title={isProcessing ? 'Time since this generation started' : 'Render time'}>
-                  <Clock className="h-3 w-3" />
-                  {formatClock(elapsedMs)}
-                </span>
+              {outputPosition && outputPosition.total > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => onOutputStep?.(-1)}
+                    disabled={outputPosition.index <= 0}
+                    title="Previous clip"
+                    aria-label="Previous clip"
+                    className="p-0.5 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="min-w-[3.5rem] text-center text-[11px] tabular-nums text-zinc-300">
+                    {outputPosition.index + 1} of {outputPosition.total}
+                  </span>
+                  <button
+                    onClick={() => onOutputStep?.(1)}
+                    disabled={outputPosition.index >= outputPosition.total - 1}
+                    title={isProcessing && outputPosition.index === outputPosition.total - 2 ? 'The clip being generated' : 'Next clip'}
+                    aria-label="Next clip"
+                    className="p-0.5 rounded border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               )}
+              <div className="ml-auto flex items-center gap-2">
+                {(_outputVideoPath ? !!outputRenderMs : isProcessing) && (
+                  <span className="flex items-center gap-1 text-[11px] font-mono tabular-nums text-zinc-400"
+                    title={_outputVideoPath ? 'Render time' : 'Time since this generation started'}>
+                    <Clock className="h-3 w-3" />
+                    {formatClock(_outputVideoPath ? outputRenderMs ?? 0 : elapsedMs)}
+                  </span>
+                )}
+                {_outputVideoPath && onOutputClear && (
+                  <button
+                    onClick={onOutputClear}
+                    title="Empty the Output panel for a fresh clip. Your clips stay in the gallery."
+                    className="flex items-center gap-1 px-2 py-0.5 rounded border border-zinc-700 text-[10px] text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
+            {/* Watching a finished clip while the next one renders: keep its progress and Stop. */}
+            {isProcessing && _outputVideoPath && (
+              <div className="px-3 py-1.5 border-b border-zinc-800 flex items-center gap-2 text-[11px] text-zinc-400">
+                <Loader2 className="h-3 w-3 text-blue-400 animate-spin" />
+                <span className="truncate">Generating the next clip</span>
+                <span className="tabular-nums">{formatClock(elapsedMs)}</span>
+                {onCancel && (
+                  <button
+                    onClick={() => { setStopRequested(true); onCancel() }}
+                    disabled={stopRequested}
+                    className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-zinc-300 bg-zinc-700/60 hover:bg-red-600/80 hover:text-white disabled:opacity-50"
+                    title="Stop the clip being generated"
+                  >
+                    <Square className="h-2.5 w-2.5 fill-current" />
+                    {stopRequested ? 'Stopping…' : 'Stop'}
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex-1 bg-black flex items-center justify-center min-h-0 relative">
+              {outputPosition && outputPosition.total > 1 && ([-1, 1] as const).map(step => {
+                const atEnd = step === -1 ? outputPosition.index <= 0 : outputPosition.index >= outputPosition.total - 1
+                const Icon = step === -1 ? ChevronLeft : ChevronRight
+                return (
+                  <button
+                    key={step}
+                    onClick={() => onOutputStep?.(step)}
+                    disabled={atEnd}
+                    title={step === -1 ? 'Previous clip' : 'Next clip'}
+                    aria-label={step === -1 ? 'Previous clip (side)' : 'Next clip (side)'}
+                    className={`absolute top-1/2 -translate-y-1/2 z-10 p-2.5 rounded-full transition ${step === -1 ? 'left-3' : 'right-3'} ${
+                      atEnd
+                        ? 'bg-[rgb(var(--accent)/0.2)] text-white/30 cursor-default'
+                        : 'bg-[rgb(var(--accent))] text-white shadow-lg shadow-black/60 ring-2 ring-white/25 hover:brightness-110'
+                    }`}
+                  >
+                    <Icon className="h-6 w-6" />
+                  </button>
+                )
+              })}
               {_outputVideoPath ? (
                 <video
+                  key={_outputVideoPath}
                   src={pathToFileUrl(_outputVideoPath)}
                   className="w-full h-full object-contain"
                   controls
