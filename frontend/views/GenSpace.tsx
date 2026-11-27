@@ -1435,10 +1435,11 @@ function PromptBar({
 
       </div>
       
-      {/* Bottom row: Mode selector + Settings. Wraps (flex-wrap) so a narrow panel
-          pushes overflowing controls onto a second line INSIDE the box, instead of
-          spilling the Generate button past the rounded border. */}
-      <div className="flex flex-wrap flex-shrink-0 items-center gap-0.5 gap-y-1.5 px-1.5 py-1.5 border-t border-zinc-800/60 text-xs text-zinc-400">
+      {/* Bottom row: Mode selector + Settings, with Generate in its own column at the right. The
+          other controls wrap onto more lines beside it, so they never push it onto a new row or
+          past the rounded border. */}
+      <div className="flex flex-shrink-0 items-end gap-1.5 px-1.5 py-1.5 border-t border-zinc-800/60 text-xs text-zinc-400">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5 gap-y-1.5">
         {/* Mode dropdown */}
         <SettingsDropdown
           title="MODE"
@@ -1868,11 +1869,13 @@ function PromptBar({
           </>
         )}
 
+      </div>
+
         {/* Generate / Stop button */}
         <button
           onClick={showStop ? onStop : onGenerate}
           disabled={showStop ? stopDisabled : generateDisabled}
-          className={`flex items-center gap-1.5 ml-auto px-3 py-1.5 rounded-md text-xs font-medium transition-all flex-shrink-0 ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all flex-shrink-0 ${
             showStop
               ? stopDisabled
                 ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
@@ -2042,7 +2045,28 @@ const DEFAULT_VIDEO_SETTINGS = {
   imageVariation: 0,
 }
 
+// IC-LoRA layout, in px. The panel's limit is its 16px top padding, about 144px of header rows
+// and 520px of viewing area.
+const IC_LORA_PANEL_MAX_HEIGHT = 680
+const IC_LORA_PANEL_GAP = 12
+const PROMPT_STACK_OFFSET = 20 // the floating prompt area's distance from the bottom
+
+/** The live height of an element, 0 until it is on screen. */
+function useElementHeight(): [(element: HTMLDivElement | null) => void, number] {
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
+  const [height, setHeight] = useState(0)
+  useEffect(() => {
+    if (!element) return
+    const observer = new ResizeObserver(() => setHeight(element.offsetHeight))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [element])
+  return [setElement, height]
+}
+
 export function GenSpace() {
+  const [genSpaceRef, genSpaceHeight] = useElementHeight()
+  const [promptStackRef, promptStackHeight] = useElementHeight()
   const {
     activeProject,
     addAsset,
@@ -4771,8 +4795,13 @@ export function GenSpace() {
     onControlChange,
   }
 
+  const icLoraSpare = Math.max(
+    0,
+    genSpaceHeight - (IC_LORA_PANEL_MAX_HEIGHT + IC_LORA_PANEL_GAP + promptStackHeight + PROMPT_STACK_OFFSET),
+  )
+
   return (
-    <div className="h-full relative bg-zinc-950">
+    <div ref={genSpaceRef} className="h-full relative bg-zinc-950">
 
       {/* Empty state */}
       {isLibraryMode && assets.length === 0 && !isGenerating && (
@@ -5154,9 +5183,14 @@ export function GenSpace() {
       )}
 
       {mode === 'ic-lora' && !forceApiGenerations && (
-        // Extra bottom clearance (vs 160px elsewhere): the floating panel here also carries the
-        // selected-IC-LoRA info banner, so reserve room so it can't cover the panel's bottom bar.
-        <div className="absolute inset-x-0 top-0 bottom-[210px] px-4 pt-4 pb-4 flex flex-col overflow-hidden">
+        // The bottom edge follows the real height of the floating prompt area (banner, queue and a
+        // resized prompt box included), so it can't cover the panel. In a tall window the panel
+        // stops growing and the spare height is split above it and below the prompt area.
+        <div
+          className="absolute inset-x-0 px-4 pt-4 flex flex-col overflow-hidden"
+          style={{ top: icLoraSpare / 2, bottom: PROMPT_STACK_OFFSET + promptStackHeight + IC_LORA_PANEL_GAP + icLoraSpare / 2 }}
+        >
+          <div className="mx-auto flex min-h-0 w-full max-w-[1700px] flex-1 flex-col">
           <ICLoraPanel
             initialVideoPath={icLoraInitial.videoPath}
             resetKey={icLoraPanelKey}
@@ -5181,6 +5215,7 @@ export function GenSpace() {
             elapsedMs={elapsedMs}
             onChange={setIcLoraInput}
           />
+          </div>
           <LoraLibraryModal
             open={libraryModalOpen}
             onClose={() => setLibraryModalOpen(false)}
@@ -5204,7 +5239,14 @@ export function GenSpace() {
           the grid cards' render-time chips (z-10), which otherwise bleed through
           the prompt box when it scrolls under them or the textarea is enlarged.
           Stays below z-50 dropdowns/modals so those still layer on top. */}
-      <div className="absolute bottom-5 left-1/2 z-20 w-[min(700px,calc(100%-2rem))] -translate-x-1/2">
+      <div
+        ref={promptStackRef}
+        className={`absolute left-1/2 z-20 -translate-x-1/2 ${
+          // IC-LoRA has more controls (LoRA slider, Advanced), so its prompt box is a little wider.
+          mode === 'ic-lora' ? 'w-[min(780px,calc(100%-2rem))]' : 'w-[min(700px,calc(100%-2rem))]'
+        }`}
+        style={{ bottom: PROMPT_STACK_OFFSET + (mode === 'ic-lora' ? icLoraSpare / 2 : 0) }}
+      >
 
         <FreeApiKeyBubble
           forceApiGenerations={forceApiGenerations}
