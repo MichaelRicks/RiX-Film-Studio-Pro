@@ -6,6 +6,7 @@ import { useHfModelAccess } from '../../hooks/use-hf-model-access'
 import { ApiClient, type ApiRequestBodyOf, type ApiSuccessOf } from '../../lib/api-client'
 import { formatBytes } from '../../lib/format'
 import { logger } from '../../lib/logger'
+import { DFR_LORA_CP_ID, DfrDownloadModal } from '../DfrDownloadModal'
 import { HfModelAccessGate } from '../HfModelAccessGate'
 import { Button } from '../ui/button'
 
@@ -217,6 +218,45 @@ function VersionRow({
   )
 }
 
+// The optional file behind the Create screen's DFR switch.
+function DfrLoraRow() {
+  const { modelsVersion } = useAppSettings()
+  const [downloaded, setDownloaded] = useState<boolean | null>(null)
+  const [open, setOpen] = useState(false)
+
+  const refresh = useCallback(async () => {
+    const result = await ApiClient.describeCheckpoints({ cp_ids: [DFR_LORA_CP_ID] })
+    if (!result.ok) {
+      logger.error(`Failed to check the DFR detail LoRA: ${result.error.message}`)
+      return
+    }
+    setDownloaded(result.data.checkpoints[0]?.downloaded ?? false)
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh, modelsVersion])
+
+  return (
+    <div className="space-y-2 pt-4 border-t border-zinc-800">
+      <h3 className="text-sm font-semibold text-white">DFR Detail LoRA</h3>
+      <p className="text-xs text-zinc-500 leading-relaxed">
+        Optional, for the DFR switch on the Create screen. Works with LTX 2.5.
+      </p>
+      <div className="flex items-center justify-between gap-3 bg-zinc-800/50 rounded-lg p-3">
+        <span className="text-sm text-zinc-300">
+          {downloaded === null ? 'Checking…' : downloaded ? 'Installed' : 'Not installed'}
+        </span>
+        {downloaded === false && (
+          <Button size="sm" onClick={() => setOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white text-xs">
+            <Download className="h-3.5 w-3.5" />
+            Get it
+          </Button>
+        )}
+      </div>
+      {open && <DfrDownloadModal onClose={() => setOpen(false)} onInstalled={() => void refresh()} />}
+    </div>
+  )
+}
+
 export function BaseModelSection() {
   const [versions, setVersions] = useState<LtxModelVersionItem[]>([])
   const [modelsDir, setModelsDir] = useState('')
@@ -335,6 +375,8 @@ export function BaseModelSection() {
           )}
         </div>
       </div>
+
+      <DfrLoraRow />
     </>
   )
 }

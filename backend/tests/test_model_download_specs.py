@@ -40,6 +40,7 @@ _LTX_2_5_NATIVE_CPS: tuple[ModelCheckpointID, ...] = (
     "ltx-2.5-video-vae-conv",
     "ltx-2.5-audio-vae",
     "ltx-2.5-duration-head",
+    "ltx-2.5-dfr-detail-lora",
     "gemma4-12b-with-proj-ltx-2.5",
 )
 
@@ -77,6 +78,7 @@ def test_ltx_2_5_model_cp_ids_include_split_vaes():
         spec.video_vae_conv_cp,
         spec.audio_vae_cp,
         spec.duration_head_cp,
+        spec.dfr_detail_lora_cp,
     )
     assert spec.video_vae_conv_cp == "ltx-2.5-video-vae-conv"
     assert spec.duration_head_cp == "ltx-2.5-duration-head"

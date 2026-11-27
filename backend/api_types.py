@@ -23,6 +23,7 @@ ModelCheckpointID = Literal[
     "ltx-2.5-video-vae-conv",
     "ltx-2.5-audio-vae",
     "ltx-2.5-duration-head",
+    "ltx-2.5-dfr-detail-lora",
     "dpt-hybrid-midas",
     "yolox-l-torchscript",
     "dw-ll-ucoco-384-bs5",
@@ -352,7 +353,7 @@ class SetActiveLtxModelRequest(BaseModel):
     model_id: LTXLocalModelId
 
 
-CheckpointRole = Literal["base", "upscaler", "text_encoder", "vae", "image", "support"]
+CheckpointRole = Literal["base", "upscaler", "text_encoder", "vae", "image", "support", "dfr"]
 
 
 class CheckpointDescriptor(BaseModel):
@@ -431,6 +432,8 @@ class GenerateVideoModelsSpecsResponse(BaseModel):
     api_models: list[LTXVideoGenerationModelSpecItem]
     # FORK: the active local model can run DFR and its detail LoRA is on disk.
     dfr_available: bool = False
+    # FORK: the active local model can run DFR but the detail LoRA still needs downloading.
+    dfr_downloadable: bool = False
 
 
 class InstalledModelResponse(BaseModel):

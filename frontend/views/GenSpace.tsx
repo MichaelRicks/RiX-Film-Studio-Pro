@@ -66,6 +66,7 @@ import {
 import { logger } from '../lib/logger'
 import { ApiClient, type ApiSuccessOf } from '../lib/api-client'
 import type { GenerationSettings, LoraSelection } from '../components/SettingsPanel'
+import { DfrDownloadModal } from '../components/DfrDownloadModal'
 import { RetakePanel } from '../components/RetakePanel'
 import { ExtendPanel } from '../components/ExtendPanel'
 import { MultiKeyframePanel } from '../components/MultiKeyframePanel'
@@ -980,8 +981,9 @@ function PromptBar({
   onSavePrompt?: () => void
   /** IC-LoRA mode: shows or hides the Advanced settings box. `changed` marks non-default values. */
   advancedToggle?: { open: boolean; changed: boolean; onToggle: () => void }
-  /** Video mode, local only. `blockedReason` disables the switch and says why. */
-  dfrToggle?: { on: boolean; blockedReason: string | null; onToggle: () => void }
+  /** Video mode, local only. `blockedReason` disables the switch and says why; with
+   *  `needsDownload`, clicking offers the missing detail LoRA instead of switching. */
+  dfrToggle?: { on: boolean; blockedReason: string | null; needsDownload: boolean; onToggle: () => void }
   canUndoPrompt?: boolean
   onUndoPrompt?: () => void
   canRedoPrompt?: boolean
@@ -1760,16 +1762,20 @@ function PromptBar({
                     type="button"
                     onClick={dfrToggle.onToggle}
                     disabled={dfrToggle.blockedReason !== null}
-                    aria-pressed={dfrToggle.on && dfrToggle.blockedReason === null}
-                    title={dfrToggle.blockedReason ?? 'DFR detail pass: sharper detail, longer render'}
+                    aria-pressed={dfrToggle.on && dfrToggle.blockedReason === null && !dfrToggle.needsDownload}
+                    title={dfrToggle.blockedReason ?? (dfrToggle.needsDownload
+                      ? 'Download the detail LoRA to use DFR'
+                      : 'DFR detail pass: sharper detail, longer render')}
                     className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed ${
-                      dfrToggle.on && dfrToggle.blockedReason === null
+                      dfrToggle.on && dfrToggle.blockedReason === null && !dfrToggle.needsDownload
                         ? 'bg-[rgb(var(--accent)/0.25)] text-white ring-1 ring-[rgb(var(--accent)/0.6)]'
                         : 'text-zinc-300 hover:bg-zinc-800'
                     }`}
                   >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    DFR {dfrToggle.on && dfrToggle.blockedReason === null ? 'On' : 'Off'}
+                    {dfrToggle.needsDownload
+                      ? <Download className="h-3.5 w-3.5" />
+                      : <Sparkles className="h-3.5 w-3.5" />}
+                    DFR {dfrToggle.on && dfrToggle.blockedReason === null && !dfrToggle.needsDownload ? 'On' : 'Off'}
                   </button>
                 )}
               </>
@@ -2284,11 +2290,11 @@ export function GenSpace() {
   const [dfrEnabled, setDfrEnabled] = useState(() => {
     try { return localStorage.getItem('genspace.useDfr') === 'true' } catch { return false }
   })
-  const toggleDfr = () => {
-    const next = !dfrEnabled
+  const saveDfrEnabled = (next: boolean) => {
     setDfrEnabled(next)
     try { localStorage.setItem('genspace.useDfr', String(next)) } catch { /* convenience only */ }
   }
+  const [dfrDownloadOpen, setDfrDownloadOpen] = useState(false)
   const continuationPendingRef = useRef(false)
   const continuationProcessedRef = useRef<string | null>(null)
   // The seed frame (source clip's last frame) for the pending continuation, used to
@@ -2311,13 +2317,14 @@ export function GenSpace() {
     [videoGenerationModelSpecsResponse, shouldVideoGenerateWithLtxApi],
   )
   const dfrAvailable = Boolean(videoGenerationModelSpecsResponse?.dfr_available)
+  const dfrDownloadable = Boolean(videoGenerationModelSpecsResponse?.dfr_downloadable)
   const videoSettingsMessage = isLoadingVideoGenerationModelSpecs
     ? 'Loading generation settings...'
     : videoGenerationModelSpecsErrorMessage
       ? `Could not load generation settings: ${videoGenerationModelSpecsErrorMessage}`
       : null
-  const dfrBlockedReason = !dfrAvailable
-    ? 'DFR needs LTX 2.5 and its detail LoRA in the ltx-2.5 models folder (restart RiX after adding it)'
+  const dfrBlockedReason = !dfrAvailable && !dfrDownloadable
+    ? 'DFR needs the LTX 2.5 model'
     : inputAudio
       ? 'DFR does not work with input audio yet'
       : inputImage && inputLastImage
@@ -4151,7 +4158,7 @@ export function GenSpace() {
       const videoSettings = sanitizeVideoSettings(settings)
       if (!videoSettings) return
       const lastImagePath = imagePath && videoSettings.duration != null ? inputLastImage : null
-      const useDfr = mode === 'video' && dfrEnabled && dfrBlockedReason === null
+      const useDfr = mode === 'video' && dfrEnabled && dfrAvailable && dfrBlockedReason === null
         && !audioPath && !lastImagePath
       const genSettings: GenerationSettings = {
           ...videoSettings,
@@ -5437,6 +5444,13 @@ export function GenSpace() {
           </div>
         )}
 
+        {dfrDownloadOpen && (
+          <DfrDownloadModal
+            onClose={() => setDfrDownloadOpen(false)}
+            onInstalled={() => saveDfrEnabled(true)}
+          />
+        )}
+
         {/* Prompt bar */}
         <PromptBar
           mode={mode}
@@ -5449,7 +5463,15 @@ export function GenSpace() {
           canUseUserLoras={canUseUserLoras}
           loraCatalogIdsByPath={loraDisplayNames}
           dfrToggle={mode === 'video' && !shouldVideoGenerateWithLtxApi
-            ? { on: dfrEnabled, blockedReason: dfrBlockedReason, onToggle: toggleDfr }
+            ? {
+                on: dfrEnabled,
+                blockedReason: dfrBlockedReason,
+                needsDownload: dfrDownloadable,
+                onToggle: () => {
+                  if (dfrDownloadable) setDfrDownloadOpen(true)
+                  else saveDfrEnabled(!dfrEnabled)
+                },
+              }
             : undefined}
           imageUsesFalApi={shouldImageGenerateWithFalApi}
           enhanceAvailableForMode={enhanceAvailableForMode}

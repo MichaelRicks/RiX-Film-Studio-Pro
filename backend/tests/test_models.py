@@ -72,6 +72,8 @@ def _optional_download_cps(*, include_text_encoder: bool, test_state=None) -> li
     unused = unused_video_vae_cp(spec, use_conv_vae=_use_conv_vae(test_state))
     if unused is not None and unused not in required:
         cps.append(unused)
+    if spec.dfr_detail_lora_cp is not None:
+        cps.append(spec.dfr_detail_lora_cp)
     if include_text_encoder:
         cps.append(spec.text_encoder_cp)
     return cps
@@ -155,7 +157,7 @@ class TestRecommendations:
 
         response = client.get("/api/models/ltx-recommendation")
         assert response.status_code == 200
-        assert response.json()["optional_cp_ids"] == []
+        assert response.json()["optional_cp_ids"] == [_current_ltx_spec().dfr_detail_lora_cp]
 
     def test_api_key_skips_text_encoder_for_supported_versions(self, client, test_state):
         test_state.state.app_settings.ltx_api_key = "test-key"
@@ -216,7 +218,7 @@ class TestRecommendations:
         assert response.json() == {
             "status": "download",
             "cps_to_download": [_current_ltx_spec().text_encoder_cp],
-            "optional_cp_ids": [],
+            "optional_cp_ids": [_current_ltx_spec().dfr_detail_lora_cp],
         }
 
     def test_upgrade_from_2_3_downloads_split_companions(

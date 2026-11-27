@@ -118,6 +118,8 @@ class ModelsHandler(StateHandlerBase):
                 return "vae"
             if cp_id == spec.duration_head_cp:
                 return "support"
+            if cp_id == spec.dfr_detail_lora_cp:
+                return "dfr"
         if cp_id == IMG_GEN_MODEL_CP_ID:
             return "image"
         return "support"
@@ -177,6 +179,9 @@ class ModelsHandler(StateHandlerBase):
             optional.add(unused_vae)
         if self._has_api_key() and spec.supports_api_text_encoding:
             optional.add(spec.text_encoder_cp)
+        # FORK: only the DFR toggle needs it, so it is offered and never required.
+        if spec.dfr_detail_lora_cp is not None:
+            optional.add(spec.dfr_detail_lora_cp)
         optional -= self._get_required_ltx_cp_ids(model_id)
         return self._get_missing_cp_ids(optional)
 

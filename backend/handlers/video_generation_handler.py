@@ -46,6 +46,7 @@ from handlers.prompt_enhancement_handler import PromptEnhancementHandler
 from handlers.text_handler import TextHandler
 from runtime_config.model_download_specs import (
     find_dfr_detail_lora,
+    get_ltx_model_spec,
     is_duration_head_ready,
     resolve_active_ltx_model_id,
 )
@@ -179,10 +180,14 @@ class VideoGenerationHandler(StateHandlerBase):
             raise HTTPError(400, invalid_code) from exc
 
     def get_model_specs(self) -> GenerateVideoModelsSpecsResponse:
+        model_id = self._active_ltx_model_id()
+        dfr_available = find_dfr_detail_lora(self.models_dir, model_id) is not None
+        dfr_supported = model_id is not None and get_ltx_model_spec(model_id).dfr_detail_lora_cp is not None
         return build_generate_video_model_specs_response(
-            local_model_id=self._active_ltx_model_id(),
+            local_model_id=model_id,
             duration_head_ready=self._duration_head_ready(),
-            dfr_available=find_dfr_detail_lora(self.models_dir, self._active_ltx_model_id()) is not None,
+            dfr_available=dfr_available,
+            dfr_downloadable=dfr_supported and not dfr_available,
         )
 
     def _resolve_dfr_lora(self, req: GenerateVideoRequest, *, use_api_specs: bool) -> str | None:
@@ -204,7 +209,7 @@ class VideoGenerationHandler(StateHandlerBase):
         if path is None:
             raise HTTPError(
                 409,
-                "DFR needs LTX 2.5 and its detail LoRA in the ltx-2.5 models folder. Turn DFR off.",
+                "DFR needs LTX 2.5 and its detail LoRA. Download it with the DFR button, or turn DFR off.",
                 code="DFR_NOT_AVAILABLE",
             )
         return str(path)

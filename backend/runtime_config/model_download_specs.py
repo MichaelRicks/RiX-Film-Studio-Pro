@@ -29,11 +29,9 @@ logger = logging.getLogger(__name__)
 # 2.5.1 patches use new filenames in the same dir — not a nested ltx-2.5.1/.
 LTX_2_5_FAMILY_DIR = Path("ltx-2.5")
 
-# FORK: DFR detail LoRA. Gated, in its own Hugging Face repo
-# (Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler). Placed by hand for now,
-# so it is not a ModelCheckpointID and never counts as a required download.
+# FORK: DFR detail LoRA. Gated, in its own Hugging Face repo with its own license
+# acceptance. Always an optional download: only the DFR toggle needs it.
 DFR_DETAIL_LORA_FILENAME = "ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors"
-_DFR_LTX_MODEL_ID: LTXLocalModelId = "ltx-2.5-22b-distilled"
 
 ALL_MODEL_CP_IDS = cast(tuple[ModelCheckpointID, ...], get_args(ModelCheckpointID))
 ALL_LTX_LOCAL_MODEL_IDS = cast(tuple[LTXLocalModelId, ...], get_args(LTXLocalModelId))
@@ -115,6 +113,8 @@ class LTXLocalModelSpec:
     # already on disk from a 2.3 install is a valid fallback (ltx-pipelines names both).
     # Optional: missing both only costs local Enhance, never generation.
     prompt_enhancer_cp: ModelCheckpointID | None = None
+    # FORK: None when this version can't run the DFR detail pass.
+    dfr_detail_lora_cp: ModelCheckpointID | None = None
     # The single newest model the app should recommend/upgrade to. Exactly one spec sets this
     # True (enforced in _validate_ltx_specs) so "latest" is explicit, not tuple-order-dependent.
     is_latest: bool = False
@@ -287,6 +287,17 @@ def get_model_cp_spec(cp_id: ModelCheckpointID) -> ModelCheckpointSpec:
                 repo_filename="model_patches/ltx-2.5-duration-head-bf16.safetensors",
                 gated=True,
             )
+        case "ltx-2.5-dfr-detail-lora":
+            return ModelCheckpointSpec(
+                relative_path=LTX_2_5_FAMILY_DIR / DFR_DETAIL_LORA_FILENAME,
+                expected_size_bytes=327_322_640,
+                is_folder=False,
+                repo_id="Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler",
+                description="LTX 2.5 DFR detail LoRA",
+                # Sits at the repo root, unlike the main 2.5 repo's subfolders.
+                repo_filename=DFR_DETAIL_LORA_FILENAME,
+                gated=True,
+            )
         case "dpt-hybrid-midas":
             return ModelCheckpointSpec(
                 relative_path=Path("dpt-hybrid-midas"),
@@ -401,6 +412,7 @@ def get_ltx_model_spec(model_id: LTXLocalModelId) -> LTXLocalModelSpec:
                 api_prompt_embedding_model=LTX_2_5_API_PROMPT_EMBEDDING_MODEL,
                 wants_audio_visual_captions=True,
                 prompt_enhancer_cp="gemma-4-e2b-it",
+                dfr_detail_lora_cp="ltx-2.5-dfr-detail-lora",
                 is_latest=True,
             )
         case "ltx-2.3-22b-distilled-1.1":
@@ -522,6 +534,8 @@ def get_ltx_model_cp_ids(model_id: LTXLocalModelId) -> tuple[ModelCheckpointID, 
     if spec.duration_head_cp is not None:
         cps.append(spec.duration_head_cp)
     cps.extend(get_ic_loras_cp_ids(spec.ic_loras_spec))
+    if spec.dfr_detail_lora_cp is not None:
+        cps.append(spec.dfr_detail_lora_cp)
     return tuple(cps)
 
 
@@ -597,10 +611,10 @@ def is_duration_head_ready(models_dir: Path, model_id: LTXLocalModelId) -> bool:
 
 def find_dfr_detail_lora(models_dir: Path, model_id: LTXLocalModelId | None) -> Path | None:
     """The DFR detail LoRA, if ``model_id`` can use it and the file is installed."""
-    if model_id != _DFR_LTX_MODEL_ID:
+    cp_id = None if model_id is None else get_ltx_model_spec(model_id).dfr_detail_lora_cp
+    if cp_id is None or not is_cp_downloaded(models_dir, cp_id):
         return None
-    path = models_dir / LTX_2_5_FAMILY_DIR / DFR_DETAIL_LORA_FILENAME
-    return path if path.is_file() else None
+    return get_existing_cp_path(models_dir, cp_id)
 
 
 def get_existing_cp_path(models_dir: Path, cp_id: ModelCheckpointID) -> Path:

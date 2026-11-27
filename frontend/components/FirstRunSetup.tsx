@@ -59,6 +59,8 @@ const CP_INFO_BY_ROLE: Record<CheckpointDescriptor['role'], string> = {
     'ship the transformer separately from their VAEs.',
   image: 'Generates still images from text prompts (used for image-to-video and image tools).',
   support: 'A supporting model used for guided generation (depth, edges, or pose control).',
+  dfr: 'Sharpens detail when the DFR switch is on. Needs its own license acceptance on Hugging Face. ' +
+    'You can also download it later from the DFR button.',
 }
 
 // One line in the first-run "What will be downloaded" list: checkpoint name, an
