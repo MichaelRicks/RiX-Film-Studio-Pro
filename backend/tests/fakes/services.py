@@ -682,6 +682,11 @@ class FakeFastVideoPipeline(_FakeVideoPipelineBase):
     pipeline_kind = "fast"
     _singleton: ClassVar["FakeFastVideoPipeline | None"] = None
 
+    def enhance_detail(self, **kwargs: Any) -> None:
+        self.enhance_calls: list[dict[str, Any]] = [*getattr(self, "enhance_calls", []), kwargs]
+        Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(kwargs["output_path"]).write_bytes(b"fake-video")
+
     @classmethod
     def bind_singleton(cls, pipeline: "FakeFastVideoPipeline") -> None:
         cls._singleton = pipeline

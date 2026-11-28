@@ -392,6 +392,7 @@ export class ApiClient {
   static qwenMultiAngleGenerate = makeEndpointClient('/api/qwen-multiangle/generate', 'post')
 
   static extend = makeEndpointClient('/api/extend', 'post')
+  static enhanceDetail = makeEndpointClient('/api/enhance-detail', 'post')
 
   static startHuggingFaceLogin = makeEndpointClient('/api/auth/huggingface/login', 'post')
 

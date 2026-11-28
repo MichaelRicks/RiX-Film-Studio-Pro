@@ -746,6 +746,53 @@
         "title": "DownloadVariant",
         "type": "object"
       },
+      "EnhanceDetailRequest": {
+        "properties": {
+          "method": {
+            "default": "refine",
+            "enum": [
+              "refine",
+              "rebuild"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "scale": {
+            "default": 1,
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Scale",
+            "type": "integer"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "videoPath": {
+            "title": "Videopath",
+            "type": "string"
+          }
+        },
+        "required": [
+          "videoPath"
+        ],
+        "title": "EnhanceDetailRequest",
+        "type": "object"
+      },
       "EnhancePromptRequest": {
         "description": "Regular-LoRA, IC-LoRA, and built-in conditioning-type selection are mutually exclusive UI\nsurfaces — a request never carries more than one of loraCatalogIds/icLoraId/conditioningType.",
         "properties": {
@@ -4668,6 +4715,66 @@
         "summary": "Route Hf Auth Status",
         "tags": [
           "hf_auth"
+        ]
+      }
+    },
+    "/api/enhance-detail": {
+      "post": {
+        "description": "POST /api/enhance-detail: a sharper copy of a finished clip.",
+        "operationId": "route_enhance_detail_api_enhance_detail_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnhanceDetailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GenerateVideoCompleteResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GenerateVideoCancelledResponse"
+                    }
+                  ],
+                  "title": "Response Route Enhance Detail Api Enhance Detail Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "4XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPErrorResponse"
+                }
+              }
+            },
+            "description": "Client Error"
+          },
+          "5XX": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPErrorResponse"
+                }
+              }
+            },
+            "description": "Server Error"
+          }
+        },
+        "summary": "Route Enhance Detail",
+        "tags": [
+          "generation"
         ]
       }
     },

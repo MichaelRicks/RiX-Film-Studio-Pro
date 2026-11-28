@@ -325,6 +325,11 @@ export const assetSchema = z.object({
   colorLabel: z.string().optional(),
   // Wall-clock time the render took, in milliseconds (local generations only).
   renderMs: z.number().optional(),
+  // Set on a copy made by Enhance detail, so it can be told apart from its original.
+  enhancedDetail: z.object({
+    method: z.enum(['refine', 'rebuild']),
+    scale: z.union([z.literal(1), z.literal(2)]),
+  }).optional(),
   // Set on a solid-color still made by Add Color Matte; the color it was painted.
   matteColor: z.string().optional(),
   // Beat times of a song from the MUSIC tab, in seconds from the start of the file (see

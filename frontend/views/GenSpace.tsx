@@ -67,6 +67,8 @@ import { logger } from '../lib/logger'
 import { ApiClient, type ApiSuccessOf } from '../lib/api-client'
 import type { GenerationSettings, LoraSelection } from '../components/SettingsPanel'
 import { DfrDownloadModal } from '../components/DfrDownloadModal'
+import { EnhanceDetailDialog, type EnhanceMethod, type EnhanceScale } from '../components/EnhanceDetailDialog'
+import { useEnhanceDetail } from '../hooks/use-enhance-detail'
 import { RetakePanel } from '../components/RetakePanel'
 import { ExtendPanel } from '../components/ExtendPanel'
 import { MultiKeyframePanel } from '../components/MultiKeyframePanel'
@@ -177,6 +179,7 @@ function AssetCard({
   onExtend,
   onContinue,
   onIcLora,
+  onEnhance,
   onToggleFavorite,
   bins,
   onTag,
@@ -203,6 +206,7 @@ function AssetCard({
   onExtend?: (asset: Asset) => void
   onContinue?: (asset: Asset) => void
   onIcLora?: (asset: Asset) => void
+  onEnhance?: (asset: Asset) => void
   onToggleFavorite?: () => void
   bins: Record<string, string>
   onTag: (binId: string | null) => void
@@ -393,6 +397,18 @@ function AssetCard({
         </button>
       )}
 
+      {/* Enhanced copies look like their original at a glance, so say which is which. */}
+      {asset.enhancedDetail && !isHovered && !selectMode && (
+        <div
+          className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/90 text-black text-[10px] font-semibold z-10 pointer-events-none"
+          title="Made with Enhance detail. The original clip is unchanged."
+        >
+          <Wand2 className="h-2.5 w-2.5" />
+          Enhanced · {asset.enhancedDetail.method === 'refine' ? 'Refine' : 'Full rebuild'}
+          {asset.enhancedDetail.scale === 2 ? ' 2x' : ''}
+        </div>
+      )}
+
       {/* Render time (local generations only) — parked bottom-left when idle so it
           reads at a glance without adding to the already-busy hover control row. */}
       {asset.renderMs != null && !isHovered && (
@@ -478,6 +494,16 @@ function AssetCard({
                   >
                     <Clapperboard className="h-3 w-3" />
                     <span className={short ? 'sr-only' : undefined}>Continue</span>
+                  </button>
+                )}
+                {onEnhance && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onEnhance(asset) }}
+                    title="Enhance detail: make a sharper copy of this clip"
+                    className={chipCls}
+                  >
+                    <Wand2 className="h-3 w-3" />
+                    <span className={short ? 'sr-only' : undefined}>Enhance</span>
                   </button>
                 )}
                 {onIcLora && (
@@ -2294,7 +2320,8 @@ export function GenSpace() {
     setDfrEnabled(next)
     try { localStorage.setItem('genspace.useDfr', String(next)) } catch { /* convenience only */ }
   }
-  const [dfrDownloadOpen, setDfrDownloadOpen] = useState(false)
+  // Who asked for the LoRA: only the DFR button switches DFR on once it arrives.
+  const [dfrDownloadFor, setDfrDownloadFor] = useState<'toggle' | 'enhance' | null>(null)
   const continuationPendingRef = useRef(false)
   const continuationProcessedRef = useRef<string | null>(null)
   // The seed frame (source clip's last frame) for the pending continuation, used to
@@ -2318,6 +2345,21 @@ export function GenSpace() {
   )
   const dfrAvailable = Boolean(videoGenerationModelSpecsResponse?.dfr_available)
   const dfrDownloadable = Boolean(videoGenerationModelSpecsResponse?.dfr_downloadable)
+  const {
+    isEnhancingDetail,
+    enhanceDetailError,
+    enhanceDetailResult,
+    submitEnhanceDetail,
+    cancelEnhanceDetail,
+    resetEnhanceDetail,
+  } = useEnhanceDetail()
+  const enhanceSubmissionRef = useRef<{ source: Asset; method: EnhanceMethod; scale: EnhanceScale } | null>(null)
+  const [enhanceTarget, setEnhanceTarget] = useState<Asset | null>(null)
+  const canEnhanceDetail = !shouldVideoGenerateWithLtxApi && (dfrAvailable || dfrDownloadable)
+  const handleEnhanceClick = useCallback((asset: Asset) => {
+    if (dfrDownloadable) setDfrDownloadFor('enhance')
+    else setEnhanceTarget(asset)
+  }, [dfrDownloadable])
   const videoSettingsMessage = isLoadingVideoGenerationModelSpecs
     ? 'Loading generation settings...'
     : videoGenerationModelSpecsErrorMessage
@@ -2935,10 +2977,10 @@ export function GenSpace() {
     }
   }, [icLoraError])
 
-  // Only show assets that were generated (have generationParams), not imported files
+  // Only show assets made here (generated, or Enhance detail copies), not imported files.
   // Memoized (fork perf): a fresh filter array every render defeated the gallery memos.
   const assets = useMemo(
-    () => (activeProject?.assets || []).filter(a => a.generationParams),
+    () => (activeProject?.assets || []).filter(a => a.generationParams || a.enhancedDetail),
     [activeProject?.assets],
   )
   const [lastPrompt, setLastPrompt] = useState('')
@@ -2964,8 +3006,8 @@ export function GenSpace() {
   // effect below is still copying the result into project storage" window — the marker is only
   // removed once that effect's own reset()/resetX() runs, so ownership must last at least that
   // long too, or the watcher can import the same completion a second time.
-  const isAnyLocalGenerationInFlight = isGenerating || isRetaking || isExtending || isIcLoraGenerating
-    || !!videoPath || imagePaths.length > 0 || !!retakeResult || !!extendResult || !!icLoraResult
+  const isAnyLocalGenerationInFlight = isGenerating || isRetaking || isExtending || isIcLoraGenerating || isEnhancingDetail
+    || !!videoPath || imagePaths.length > 0 || !!retakeResult || !!extendResult || !!icLoraResult || !!enhanceDetailResult
   useEffect(() => {
     if (!isAnyLocalGenerationInFlight) return
     setActiveGenerationOwner(currentProjectId)
@@ -3057,7 +3099,7 @@ export function GenSpace() {
   // Render stopwatch: (re)start when a generation begins, tick while running,
   // and freeze the last value when it stops (the cleanup clears the interval).
   // IC-LoRA runs have their own in-flight flag, so they feed the same stopwatch.
-  const stopwatchRunning = isGenerating || isIcLoraGenerating
+  const stopwatchRunning = isGenerating || isIcLoraGenerating || isEnhancingDetail
   useEffect(() => {
     if (!stopwatchRunning) return
     generationStartRef.current = Date.now()
@@ -3327,6 +3369,62 @@ export function GenSpace() {
       resetRetake()
     })()
   }, [retakeResult, isRetaking, currentProjectId, activeProject?.assets, activeRetakeSource, addAsset, addTakeToAsset, updateAsset, setPendingRetakeUpdate, resetRetake, isLocalMode])
+
+  useEffect(() => {
+    if (!enhanceDetailError) return
+    enhanceSubmissionRef.current = null
+    localStorage.removeItem(GENERATION_RECOVERY_KEY)
+    setLocalError(createLocalGenerationError(enhanceDetailError))
+    resetEnhanceDetail()
+  }, [enhanceDetailError, resetEnhanceDetail])
+
+  // A finished Enhance detail run is saved as a new clip beside the original. It carries no
+  // generationParams: Regenerate would remake the shot without this pass.
+  useEffect(() => {
+    if (!enhanceDetailResult || !currentProjectId || isEnhancingDetail) return
+    const submission = enhanceSubmissionRef.current
+    if (!submission) return
+    enhanceSubmissionRef.current = null
+    localStorage.removeItem(GENERATION_RECOVERY_KEY)
+    const renderMs = generationStartRef.current != null ? Date.now() - generationStartRef.current : undefined
+
+    ;(async () => {
+      const copied = await addVisualAssetToProject(enhanceDetailResult.videoPath, currentProjectId, 'video')
+      if (!copied) {
+        logger.error('Could not persist the enhanced clip to project storage')
+        setLocalError(createLocalGenerationError('Failed to save the enhanced clip to project storage.'))
+        resetEnhanceDetail()
+        return
+      }
+      const { source, method, scale } = submission
+      // From the file itself: the source may have no saved length, and the timeline needs one.
+      const measuredDuration = await probeVideoDuration(pathToFileUrl(copied.path))
+      addAsset(currentProjectId, {
+        type: 'video',
+        path: copied.path,
+        bigThumbnailPath: copied.bigThumbnailPath,
+        smallThumbnailPath: copied.smallThumbnailPath,
+        width: copied.width,
+        height: copied.height,
+        prompt: source.prompt,
+        resolution: scale === 1 ? source.resolution : '',
+        duration: measuredDuration ?? source.duration,
+        binId: source.binId,
+        renderMs,
+        enhancedDetail: { method, scale },
+        takes: [{
+          path: copied.path,
+          bigThumbnailPath: copied.bigThumbnailPath,
+          smallThumbnailPath: copied.smallThumbnailPath,
+          width: copied.width,
+          height: copied.height,
+          createdAt: Date.now(),
+        }],
+        activeTakeIndex: 0,
+      })
+      resetEnhanceDetail()
+    })()
+  }, [enhanceDetailResult, isEnhancingDetail, currentProjectId, addAsset, resetEnhanceDetail])
 
   // When extend completes, save the longer video as a new asset.
   useEffect(() => {
@@ -3962,6 +4060,16 @@ export function GenSpace() {
     return snippet ? `${kind} · ${snippet.length > 48 ? `${snippet.slice(0, 48)}…` : snippet}` : kind
   }
 
+  const startEnhanceDetail = async (source: Asset, method: EnhanceMethod, scale: EnhanceScale) => {
+    setEnhanceTarget(null)
+    await startOrQueue(queueLabel('Enhance', source.prompt), async () => {
+      enhanceSubmissionRef.current = { source, method, scale }
+      // If the project is left mid-run, the result is still imported as a video clip.
+      await writeRecoveryContext({ prompt: source.prompt })
+      void submitEnhanceDetail({ videoPath: source.path, prompt: source.prompt, method, scale })
+    })
+  }
+
   const handleGenerate = async () => {
     if (mode === 'ic-lora') {
       if ((!prompt.trim() && !promptOptional) || !icLoraInput.videoPath || !icLoraInput.ready) return
@@ -4539,7 +4647,7 @@ export function GenSpace() {
   // GenSpace mode tab. Retake/extend/IC-LoRA live in different hooks than video/image.
   // After a UI refresh those hooks remount at false; the same progress poll that disables
   // Generate (isOtherGenerationRunning) is the SSOT for "slot busy" / Stop.
-  const slotBusyLocally = isGenerating || isRetaking || isExtending || isIcLoraGenerating
+  const slotBusyLocally = isGenerating || isRetaking || isExtending || isIcLoraGenerating || isEnhancingDetail
   // Whether the inputs are enough to start a job. Busy is separate: a job started while
   // another runs (or waits) is queued, so it no longer blocks Generate.
   const canSubmit = (isRetakeMode
@@ -4571,8 +4679,9 @@ export function GenSpace() {
     // reset), so "a result is held" must not block the queue forever: only wait while it is
     // still waiting to be saved (its submission is cleared as soon as the save starts).
     const icLoraSaving = !!icLoraResult && icLoraSubmissionRef.current != null
-    const localBusy = isGenerating || isRetaking || isExtending || isIcLoraGenerating
+    const localBusy = isGenerating || isRetaking || isExtending || isIcLoraGenerating || isEnhancingDetail
       || !!videoPath || imagePaths.length > 0 || !!retakeResult || !!extendResult || icLoraSaving
+      || !!enhanceDetailResult
     if (slotBusyLocally || isOtherGenerationRunning || localBusy) return
     if (error || localError) return
     const [next, ...rest] = genQueue
@@ -4585,9 +4694,9 @@ export function GenSpace() {
         launchingRef.current = false
         setDispatchTick(t => t + 1)
       })
-  }, [genQueue, dispatchTick, slotBusyLocally, isOtherGenerationRunning, isGenerating, isRetaking, isExtending, isIcLoraGenerating, videoPath, imagePaths.length, retakeResult, extendResult, icLoraResult, error, localError])
+  }, [genQueue, dispatchTick, slotBusyLocally, isOtherGenerationRunning, isGenerating, isRetaking, isExtending, isIcLoraGenerating, videoPath, imagePaths.length, retakeResult, extendResult, icLoraResult, isEnhancingDetail, enhanceDetailResult, error, localError])
 
-  const anyJobRunning = isGenerating || isRetaking || isExtending || isIcLoraGenerating
+  const anyJobRunning = isGenerating || isRetaking || isExtending || isIcLoraGenerating || isEnhancingDetail
   useEffect(() => {
     if (!anyJobRunning) {
       setStopRequestedAt(null)
@@ -4802,6 +4911,7 @@ export function GenSpace() {
       onExtend={handleExtend}
       onContinue={handleContinue}
       onIcLora={!forceApiGenerations ? handleIcLora : undefined}
+      onEnhance={canEnhanceDetail ? handleEnhanceClick : undefined}
       onToggleFavorite={() => currentProjectId && toggleFavorite(currentProjectId, asset.id)}
       bins={bins}
       onTag={(binId) => currentProjectId && updateAsset(currentProjectId, asset.id, { binId: binId ?? undefined })}
@@ -4818,6 +4928,7 @@ export function GenSpace() {
     // measuredRatiosVersion: bumps when measuredRatiosRef gains entries, so ratios are re-read.
     filteredAssets, bins, sendToNewTimeline, handleDelete, handleDragStart, handleCreateVideo, handleRegenerate,
     handleRetake, handleExtend, handleIcLora, forceApiGenerations, currentProjectId,
+    canEnhanceDetail, handleEnhanceClick,
     toggleFavorite, updateAsset, setSelectedAsset, setCreatingTagFor,
     selectMode, selectedIds, toggleSelect, natural, handleMediaMeasured, measuredRatiosVersion,
   ])
@@ -5184,7 +5295,7 @@ export function GenSpace() {
               const pendingRatio = mode === 'image' && inputImage && inputImageRatio
                 ? inputImageRatio // image edit: output keeps the source's shape
                 : arMatch ? Number(arMatch[1]) / Number(arMatch[2]) : 16 / 9
-              const generatingCard = isGenerating && (
+              const generatingCard = (isGenerating || isEnhancingDetail) && (
                 <div
                   key="__generating__"
                   className={`relative rounded-xl overflow-hidden bg-zinc-800 ${natural ? '' : 'aspect-video'}`}
@@ -5198,18 +5309,20 @@ export function GenSpace() {
                         <Sparkles className="h-6 w-6 text-violet-400" />
                       </div>
                     </div>
-                    <p className="text-sm text-zinc-400">{statusMessage || 'Generating...'}</p>
+                    <p className="text-sm text-zinc-400">
+                      {isEnhancingDetail ? 'Enhancing detail…' : statusMessage || 'Generating...'}
+                    </p>
                     <p className="mt-1 flex items-center gap-1 text-xs text-zinc-500 tabular-nums">
                       <Clock className="h-3 w-3" />
                       {formatClock(elapsedMs)}
                     </p>
-                    {progress > 0 && (
+                    {!isEnhancingDetail && progress > 0 && (
                       <div className="w-32 h-1 bg-zinc-800 rounded-full mt-2 overflow-hidden">
                         <div className="h-full bg-violet-500 transition-all" style={{ width: `${progress}%` }} />
                       </div>
                     )}
                     <button
-                      onClick={() => void cancel()}
+                      onClick={() => void (isEnhancingDetail ? cancelEnhanceDetail() : cancel())}
                       className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-zinc-300 bg-zinc-700/60 hover:bg-red-600/80 hover:text-white transition-colors"
                       title="Stop this generation"
                     >
@@ -5444,10 +5557,18 @@ export function GenSpace() {
           </div>
         )}
 
-        {dfrDownloadOpen && (
+        {dfrDownloadFor && (
           <DfrDownloadModal
-            onClose={() => setDfrDownloadOpen(false)}
-            onInstalled={() => saveDfrEnabled(true)}
+            onClose={() => setDfrDownloadFor(null)}
+            onInstalled={() => { if (dfrDownloadFor === 'toggle') saveDfrEnabled(true) }}
+          />
+        )}
+        {enhanceTarget && (
+          <EnhanceDetailDialog
+            videoPath={enhanceTarget.path}
+            queueing={generationBusy}
+            onClose={() => setEnhanceTarget(null)}
+            onStart={(method, scale) => { void startEnhanceDetail(enhanceTarget, method, scale) }}
           />
         )}
 
@@ -5468,7 +5589,7 @@ export function GenSpace() {
                 blockedReason: dfrBlockedReason,
                 needsDownload: dfrDownloadable,
                 onToggle: () => {
-                  if (dfrDownloadable) setDfrDownloadOpen(true)
+                  if (dfrDownloadable) setDfrDownloadFor('toggle')
                   else saveDfrEnabled(!dfrEnabled)
                 },
               }
@@ -5733,6 +5854,16 @@ export function GenSpace() {
               )}
               {selectedAsset.type === 'video' && (
                 <>
+                  {canEnhanceDetail && (
+                    <button
+                      onClick={() => { const a = selectedAsset; setSelectedAsset(null); handleEnhanceClick(a) }}
+                      title="Enhance detail: make a sharper copy of this clip"
+                      className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium flex items-center gap-2 transition-colors"
+                    >
+                      <Wand2 className="h-4 w-4" />
+                      Enhance
+                    </button>
+                  )}
                   <button
                     onClick={() => { const a = selectedAsset; setSelectedAsset(null); handleRetake(a) }}
                     className="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium flex items-center gap-2 transition-colors"
@@ -5897,7 +6028,16 @@ export function GenSpace() {
                 {[
                   selectedAsset.generationParams?.modelLabel,
                   selectedAsset.resolution,
-                  selectedAsset.duration ? `${formatSeconds(selectedAsset.duration)}s` : 'Image',
+                  selectedAsset.enhancedDetail
+                    ? `Enhanced: ${selectedAsset.enhancedDetail.method === 'refine' ? 'Refine' : 'Full rebuild'}${selectedAsset.enhancedDetail.scale === 2 ? ' 2x' : ''}`
+                    : null,
+                  selectedAsset.enhancedDetail && selectedAsset.width && selectedAsset.height
+                    ? `${selectedAsset.width}x${selectedAsset.height}`
+                    : null,
+                  // Some video clips (IC-LoRA) carry no saved length; that doesn't make them images.
+                  selectedAsset.type === 'image'
+                    ? 'Image'
+                    : selectedAsset.duration ? `${formatSeconds(selectedAsset.duration)}s` : null,
                   selectedAsset.generationParams?.seed != null ? `Seed ${selectedAsset.generationParams.seed}` : null,
                   selectedAsset.generationParams?.imageVariation ? `Variation ${Math.round(selectedAsset.generationParams.imageVariation * 100)}%` : null,
                   selectedAsset.renderMs != null ? `${formatClock(selectedAsset.renderMs)} render` : null,

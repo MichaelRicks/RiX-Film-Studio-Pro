@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
-from api_types import ImageConditioningInput
+from api_types import EnhanceDetailMethod, ImageConditioningInput
 from frame_math import AutoDurationSpec
 
 if TYPE_CHECKING:
@@ -42,6 +42,19 @@ class FastVideoPipeline(Protocol):
         *,
         guide_all_images: bool = False,
         dfr_lora_path: str | None = None,
+    ) -> None:
+        ...
+
+    def enhance_detail(
+        self,
+        *,
+        video_path: str,
+        prompt: str,
+        seed: int,
+        method: EnhanceDetailMethod,
+        scale: int,
+        detail_lora_path: str,
+        output_path: str,
     ) -> None:
         ...
 

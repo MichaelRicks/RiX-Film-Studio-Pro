@@ -72,6 +72,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/enhance-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Route Enhance Detail
+         * @description POST /api/enhance-detail: a sharper copy of a finished clip.
+         */
+        post: operations["route_enhance_detail_api_enhance_detail_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/enhance-prompt": {
         parameters: {
             query?: never;
@@ -941,6 +961,30 @@ export interface components {
             label: string;
             /** Size Bytes */
             size_bytes: number;
+        };
+        /** EnhanceDetailRequest */
+        EnhanceDetailRequest: {
+            /**
+             * Method
+             * @default refine
+             * @enum {string}
+             */
+            method: "refine" | "rebuild";
+            /**
+             * Prompt
+             * @default
+             */
+            prompt: string;
+            /**
+             * Scale
+             * @default 1
+             * @enum {integer}
+             */
+            scale: 1 | 2;
+            /** Seed */
+            seed?: number | null;
+            /** Videopath */
+            videoPath: string;
         };
         /**
          * EnhancePromptRequest
@@ -2487,6 +2531,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HuggingFaceAuthStatusResponse"];
+                };
+            };
+            /** @description Client Error */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPErrorResponse"];
+                };
+            };
+            /** @description Server Error */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPErrorResponse"];
+                };
+            };
+        };
+    };
+    route_enhance_detail_api_enhance_detail_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnhanceDetailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateVideoCompleteResponse"] | components["schemas"]["GenerateVideoCancelledResponse"];
                 };
             };
             /** @description Client Error */

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from api_types import (
     CancelResponse,
+    EnhanceDetailRequest,
     GenerateVideoModelsSpecsResponse,
     GenerateVideoRequest,
     GenerateVideoResponse,
@@ -34,6 +35,15 @@ def route_generate(
 ) -> GenerateVideoResponse:
     """POST /api/generate — video generation from JSON body."""
     return handler.video_generation.generate(req)
+
+
+@router.post("/enhance-detail", response_model=GenerateVideoResponse)
+def route_enhance_detail(
+    req: EnhanceDetailRequest,
+    handler: AppHandler = Depends(get_state_service),
+) -> GenerateVideoResponse:
+    """POST /api/enhance-detail: a sharper copy of a finished clip."""
+    return handler.video_generation.enhance_detail(req)
 
 
 @router.get("/generate/models-specs", response_model=GenerateVideoModelsSpecsResponse)

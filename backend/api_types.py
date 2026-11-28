@@ -493,6 +493,22 @@ class GenerateVideoRequest(BaseModel):
     useDfr: bool = False
 
 
+# FORK: run the DFR detail LoRA over a finished clip.
+EnhanceDetailMethod: TypeAlias = Literal["refine", "rebuild"]
+
+
+class EnhanceDetailRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    videoPath: str
+    prompt: str = ""
+    # refine: 3 steps starting from the clip. rebuild: 8 steps from noise, guided by it.
+    method: EnhanceDetailMethod = "refine"
+    # 1 keeps the clip's size; 2 doubles it.
+    scale: Literal[1, 2] = 1
+    seed: int | None = None
+
+
 class GenerateImageRequest(BaseModel):
     model_config = ConfigDict(strict=True)
 

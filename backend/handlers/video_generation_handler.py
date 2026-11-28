@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from api_types import (
+    EnhanceDetailRequest,
     GenerateVideoCancelledResponse,
     GenerateVideoCompleteResponse,
     GenerateVideoModelsSpecsResponse,
@@ -44,6 +45,8 @@ from handlers.generation_handler import GenerationHandler
 from handlers.pipelines_handler import PipelinesHandler
 from handlers.prompt_enhancement_handler import PromptEnhancementHandler
 from handlers.text_handler import TextHandler
+from handlers.video_resolution import validate_source_video_path
+from services.detail_pass.video_io import probe_video, unsupported_reason
 from runtime_config.model_download_specs import (
     find_dfr_detail_lora,
     get_ltx_model_spec,
@@ -359,6 +362,76 @@ class VideoGenerationHandler(StateHandlerBase):
                     return GenerateVideoCancelledResponse(status="cancelled")
 
                 raise HTTPError(500, str(e)) from e
+
+    def enhance_detail(self, req: EnhanceDetailRequest) -> GenerateVideoResponse:
+        """Make a sharper copy of a finished clip. The original is left alone."""
+        if should_video_generate_with_ltx_api(
+            force_api_generations=self.config.force_api_generations,
+            settings=self.state.app_settings,
+        ):
+            raise HTTPError(422, "Enhance detail runs only on this computer.", code="ENHANCE_LOCAL_ONLY")
+        source = validate_source_video_path(req.videoPath)
+        lora_path = find_dfr_detail_lora(self.models_dir, self._active_ltx_model_id())
+        if lora_path is None:
+            raise HTTPError(
+                409,
+                "Enhance detail needs LTX 2.5 and the DFR detail LoRA.",
+                code="DFR_NOT_AVAILABLE",
+            )
+        try:
+            info = probe_video(str(source))
+        except Exception as exc:  # PyAV raises library-specific errors on bad input
+            raise HTTPError(400, "Couldn't read the video file; it may be corrupt or unsupported.") from exc
+        reason = unsupported_reason(info, req.scale)
+        if reason is not None:
+            raise HTTPError(422, reason, code="ENHANCE_UNSUPPORTED_CLIP")
+
+        # An Ingredients prompt's sheet description is about the sheet, which this pass never sees.
+        prompt = req.prompt.split("Generated video:", 1)[-1].strip()
+
+        with self._generation.reserved_generation_start():
+            generation_id = self._make_generation_id()
+            seed = req.seed if req.seed is not None else self._resolve_seed()
+            output_path = self._make_output_path()
+            try:
+                self._generation.raise_if_cancelled()
+                pipeline_state = self._pipelines.load_gpu_pipeline("fast", loras=[])
+                self._generation.start_generation(generation_id)
+                self._generation.update_progress("encoding_text", 10, 0, 1)
+                self._text.prepare_text_encoding(prompt, enhance_prompt=False)
+                self._generation.raise_if_cancelled()
+                self._generation.update_progress("inference", 15, 0, 1)
+                started = time.perf_counter()
+                with log_heartbeat("enhance detail"):
+                    pipeline_state.pipeline.enhance_detail(
+                        video_path=str(source),
+                        prompt=prompt,
+                        seed=seed,
+                        method=req.method,
+                        scale=req.scale,
+                        detail_lora_path=str(lora_path),
+                        output_path=str(output_path),
+                    )
+                logger.info(
+                    "Enhance detail (%s, %dx) finished in %.1fs", req.method, req.scale, time.perf_counter() - started
+                )
+                if self._generation.is_generation_cancelled():
+                    output_path.unlink(missing_ok=True)
+                    raise GenerationCancelledError()
+                self._generation.update_progress("complete", 100, 1, 1)
+                self._generation.complete_generation(str(output_path))
+                return GenerateVideoCompleteResponse(status="complete", video_path=str(output_path), seed=seed)
+            except HTTPError as e:
+                self._generation.fail_generation(e.detail)
+                raise
+            except Exception as e:
+                self._generation.fail_generation(str(e))
+                if is_cancel_exception(e):
+                    logger.info("Enhance detail cancelled by user")
+                    return GenerateVideoCancelledResponse(status="cancelled")
+                raise HTTPError(500, str(e)) from e
+            finally:
+                self._text.clear_api_embeddings()
 
     def _resolve_loras(self, loras: list[LoraEntry]) -> list[tuple[str, float]]:
         if loras:
